@@ -2,12 +2,13 @@
   "model_path": "models/pose_landmarker_heavy.task",
   "output_dir": "data/output",
   "input_paths": [
-    "data/videos/3171-166338953_small.mp4",
-    "data/videos/image.jpg"
+    "data/videos/video.mp4",
+    "data/videos/3044091-sd_640_360_24fps.mp4"
   ],
   "batch_mode": true,
   "save_annotated": true,
   "save_csv": true,
+  "save_skeleton": true,
   "auto_open": false,
   "min_pose_detection_confidence": 0.5,
   "min_pose_presence_confidence": 0.5,
@@ -18,6 +19,12 @@
   "landmark_thickness": 2,
   "connection_thickness": 2,
   "landmark_radius": 2,
+  "skeleton_background_color": [0, 0, 0],
+  "skeleton_landmark_color": [0, 255, 0],
+  "skeleton_connection_color": [255, 0, 0],
+  "skeleton_landmark_thickness": 3,
+  "skeleton_connection_thickness": 2,
+  "skeleton_landmark_radius": 4,
   "video_codec": "mp4v",
   "image_extensions": [".jpg", ".jpeg", ".png", ".bmp"],
   "video_extensions": [".mp4", ".mov", ".avi", ".mkv"]
