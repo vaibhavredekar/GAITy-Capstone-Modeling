@@ -90,6 +90,7 @@ class PipelineConfig:
     batch_mode: bool = False
     save_annotated: bool = True
     save_csv: bool = True
+    save_skeleton: bool = True  # NEW: Export skeleton-only visualization
     auto_open: bool = False
     
     # Visualization
@@ -98,6 +99,14 @@ class PipelineConfig:
     landmark_thickness: int = 2
     connection_thickness: int = 2
     landmark_radius: int = 2
+    
+    # Skeleton-only visualization settings
+    skeleton_background_color: Tuple[int, int, int] = (0, 0, 0)  # Black
+    skeleton_landmark_color: Tuple[int, int, int] = (0, 255, 0)  # Green
+    skeleton_connection_color: Tuple[int, int, int] = (255, 0, 0)  # Red
+    skeleton_landmark_thickness: int = 3
+    skeleton_connection_thickness: int = 2
+    skeleton_landmark_radius: int = 4
     
     # Video codec
     video_codec: str = "mp4v"
@@ -198,6 +207,7 @@ class PipelineConfig:
             'batch_mode': self.batch_mode,
             'save_annotated': self.save_annotated,
             'save_csv': self.save_csv,
+            'save_skeleton': self.save_skeleton,  # NEW: Include save_skeleton in JSON
             'auto_open': self.auto_open,
             'min_pose_detection_confidence': self.min_pose_detection_confidence,
             'min_pose_presence_confidence': self.min_pose_presence_confidence,
@@ -208,6 +218,12 @@ class PipelineConfig:
             'landmark_thickness': self.landmark_thickness,
             'connection_thickness': self.connection_thickness,
             'landmark_radius': self.landmark_radius,
+            'skeleton_background_color': list(self.skeleton_background_color),
+            'skeleton_landmark_color': list(self.skeleton_landmark_color),
+            'skeleton_connection_color': list(self.skeleton_connection_color),
+            'skeleton_landmark_thickness': self.skeleton_landmark_thickness,
+            'skeleton_connection_thickness': self.skeleton_connection_thickness,
+            'skeleton_landmark_radius': self.skeleton_landmark_radius,
             'video_codec': self.video_codec,
             'image_extensions': list(self.image_extensions),
             'video_extensions': list(self.video_extensions)
@@ -450,12 +466,18 @@ class PoseVisualizer:
     def __init__(self, config: PipelineConfig):
         self.config = config
     
+    def create_blank_canvas(self, width: int, height: int) -> np.ndarray:
+        """Create a blank canvas with background color"""
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+        canvas[:] = self.config.skeleton_background_color
+        return canvas
+    
     def draw_landmarks(
         self,
         image_rgb: np.ndarray,
         landmarks: List
     ) -> np.ndarray:
-        """Draw landmarks on image"""
+        """Draw landmarks on image (with background)"""
         annotated = image_rgb.copy()
         
         pose_proto = landmark_pb2.NormalizedLandmarkList()
@@ -480,6 +502,40 @@ class PoseVisualizer:
         )
         
         return annotated
+    
+    def draw_skeleton_only(
+        self,
+        width: int,
+        height: int,
+        landmarks: List
+    ) -> np.ndarray:
+        """Draw ONLY skeleton on black background (no original image)"""
+        # Create blank canvas
+        canvas = self.create_blank_canvas(width, height)
+        
+        # Draw skeleton
+        pose_proto = landmark_pb2.NormalizedLandmarkList()
+        pose_proto.landmark.extend([
+            landmark_pb2.NormalizedLandmark(x=lm.x, y=lm.y, z=lm.z)
+            for lm in landmarks
+        ])
+        
+        mp.solutions.drawing_utils.draw_landmarks(
+            canvas,
+            pose_proto,
+            mp.solutions.pose.POSE_CONNECTIONS,
+            landmark_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                color=self.config.skeleton_landmark_color,
+                thickness=self.config.skeleton_landmark_thickness,
+                circle_radius=self.config.skeleton_landmark_radius
+            ),
+            connection_drawing_spec=mp.solutions.drawing_utils.DrawingSpec(
+                color=self.config.skeleton_connection_color,
+                thickness=self.config.skeleton_connection_thickness
+            ),
+        )
+        
+        return canvas
 
 
 # ============================================================
@@ -524,6 +580,7 @@ class ImageProcessor:
             self.config.output_dir.mkdir(parents=True, exist_ok=True)
             csv_path = self.config.output_dir / f"{stem}_landmarks.csv"
             img_path = self.config.output_dir / f"{stem}_annotated.png"
+            skeleton_path = self.config.output_dir / f"{stem}_skeleton.png"
             
             landmarks_count = 0
             
@@ -551,6 +608,17 @@ class ImageProcessor:
                 annotated_bgr = cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
                 cv2.imwrite(str(img_path), annotated_bgr)
                 result.output_paths['annotated'] = img_path
+            
+            # NEW: Save skeleton-only image
+            if self.config.save_skeleton and detection_result.pose_landmarks:
+                skeleton_rgb = self.visualizer.draw_skeleton_only(
+                    width,
+                    height,
+                    detection_result.pose_landmarks[0]
+                )
+                skeleton_bgr = cv2.cvtColor(skeleton_rgb, cv2.COLOR_RGB2BGR)
+                cv2.imwrite(str(skeleton_path), skeleton_bgr)
+                result.output_paths['skeleton'] = skeleton_path
             
             result.success = True
             result.frames_processed = 1
@@ -593,6 +661,7 @@ class VideoProcessor:
         
         cap = None
         writer = None
+        skeleton_writer = None  # NEW: For skeleton-only video
         csv_writer_ctx = None
         
         try:
@@ -612,6 +681,7 @@ class VideoProcessor:
             self.config.output_dir.mkdir(parents=True, exist_ok=True)
             csv_path = self.config.output_dir / f"{stem}_landmarks.csv"
             video_path = self.config.output_dir / f"{stem}_annotated.mp4"
+            skeleton_video_path = self.config.output_dir / f"{stem}_skeleton.mp4"
             
             if self.config.save_csv:
                 csv_writer_ctx = LandmarkCSVWriter(csv_path)
@@ -627,6 +697,17 @@ class VideoProcessor:
                     (width, height)
                 )
                 result.output_paths['annotated'] = video_path
+            
+            # NEW: Initialize skeleton video writer
+            if self.config.save_skeleton:
+                fourcc = cv2.VideoWriter_fourcc(*self.config.video_codec)
+                skeleton_writer = cv2.VideoWriter(
+                    str(skeleton_video_path),
+                    fourcc,
+                    fps,
+                    (width, height)
+                )
+                result.output_paths['skeleton'] = skeleton_video_path
             
             frame_idx = 0
             landmarks_count = 0
@@ -665,6 +746,16 @@ class VideoProcessor:
                     annotated_bgr = cv2.cvtColor(annotated_rgb, cv2.COLOR_RGB2BGR)
                     writer.write(annotated_bgr)
                 
+                # NEW: Write skeleton frame to skeleton video
+                if self.config.save_skeleton and detection_result.pose_landmarks:
+                    skeleton_rgb = self.visualizer.draw_skeleton_only(
+                        width,
+                        height,
+                        detection_result.pose_landmarks[0]
+                    )
+                    skeleton_bgr = cv2.cvtColor(skeleton_rgb, cv2.COLOR_RGB2BGR)
+                    skeleton_writer.write(skeleton_bgr)
+                
                 frame_idx += 1
                 
                 if frame_idx % 30 == 0 or frame_idx == total_frames:
@@ -688,6 +779,8 @@ class VideoProcessor:
                 cap.release()
             if writer:
                 writer.release()
+            if skeleton_writer:  # NEW: Release skeleton writer
+                skeleton_writer.release()
             if csv_writer_ctx:
                 csv_writer_ctx.__exit__(None, None, None)
             
@@ -874,6 +967,7 @@ def main():
                 batch_mode=True,
                 save_annotated=True,
                 save_csv=True,
+                save_skeleton=False,  # NEW: Enable skeleton export
                 auto_open=False,
                 min_pose_detection_confidence=0.5,
                 min_pose_presence_confidence=0.5,
