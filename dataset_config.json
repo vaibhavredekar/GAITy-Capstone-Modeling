@@ -1,0 +1,8 @@
+{
+  "dataset_root": "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\dataset_samples",
+  "output_root": "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples",
+  "video_type": "from_images",
+  "overlay_skeleton": true,
+  "export_csv": true,
+  "fps": 30.0
+}

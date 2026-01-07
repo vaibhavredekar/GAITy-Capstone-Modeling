@@ -1,7 +1,10 @@
 {
-  "model_path": "models/pose_landmarker_heavy.task",
-  "output_dir": "data/output",
-  "input_paths": [
+  "metadata": {
+    "generated_at": "2026-01-07T17:43:30.655430",
+    "total_videos": 8,
+    "source_directory": "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples"
+  },
+  "video_files": [
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\FGS\\semantic_segmentation_PA000_FGS_WJ_1_DensePose\\semantic_segmentation_PA000_FGS_WJ_1_DensePose.mp4",
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\FGS\\semantic_segmentation_PA000_FGS_WJ_2_DensePose\\semantic_segmentation_PA000_FGS_WJ_2_DensePose.mp4",
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\FGS\\semantic_segmentation_PA000_FGS_WoJ_1_DensePose\\semantic_segmentation_PA000_FGS_WoJ_1_DensePose.mp4",
@@ -10,28 +13,5 @@
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\UGS\\semantic_segmentation_PA000_UGS_WJ_2_DensePose\\semantic_segmentation_PA000_UGS_WJ_2_DensePose.mp4",
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\UGS\\semantic_segmentation_PA000_UGS_WoJ_1_DensePose\\semantic_segmentation_PA000_UGS_WoJ_1_DensePose.mp4",
     "C:\\User_V\\2_Github\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\semantic_segmentation\\PA000\\UGS\\semantic_segmentation_PA000_UGS_WoJ_2_DensePose\\semantic_segmentation_PA000_UGS_WoJ_2_DensePose.mp4"
-  ],
-  "batch_mode": true,
-  "save_annotated": true,
-  "save_csv": true,
-  "save_skeleton": true,
-  "auto_open": false,
-  "min_pose_detection_confidence": 0.5,
-  "min_pose_presence_confidence": 0.5,
-  "min_tracking_confidence": 0.5,
-  "num_poses": 1,
-  "landmark_color": [0, 255, 0],
-  "connection_color": [255, 0, 0],
-  "landmark_thickness": 2,
-  "connection_thickness": 2,
-  "landmark_radius": 2,
-  "skeleton_background_color": [0, 0, 0],
-  "skeleton_landmark_color": [0, 255, 0],
-  "skeleton_connection_color": [255, 0, 0],
-  "skeleton_landmark_thickness": 3,
-  "skeleton_connection_thickness": 2,
-  "skeleton_landmark_radius": 4,
-  "video_codec": "mp4v",
-  "image_extensions": [".jpg", ".jpeg", ".png", ".bmp"],
-  "video_extensions": [".mp4", ".mov", ".avi", ".mkv"]
+  ]
 }
