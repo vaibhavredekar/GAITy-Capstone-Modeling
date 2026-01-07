@@ -1157,7 +1157,7 @@ def main():
             )
         
         # Save configuration for reference
-        config_path = Path.cwd() / "last_dataset_config.json"
+        config_path = Path.cwd() / "dataset_config.json"
         with open(config_path, 'w') as f:
             json.dump({
                 'dataset_root': str(config.dataset_root),
