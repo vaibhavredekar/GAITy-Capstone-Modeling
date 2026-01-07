@@ -725,15 +725,43 @@ class VideoProcessor:
                     timestamp_ms
                 )
                 
-                if self.config.save_csv and detection_result.pose_landmarks:
-                    landmarks_count += csv_writer.write_landmarks(
-                        detection_result.pose_landmarks[0],
-                        frame_idx=frame_idx,
-                        timestamp_ms=timestamp_ms,
-                        width=width,
-                        height=height
-                    )
+                # if self.config.save_csv and detection_result.pose_landmarks:
+                #     landmarks_count += csv_writer.write_landmarks(
+                #         detection_result.pose_landmarks[0],
+                #         frame_idx=frame_idx,
+                #         timestamp_ms=timestamp_ms,
+                #         width=width,
+                #         height=height
+                #     )
                 
+                # Testing for no pose detected in the video 
+                if self.config.save_csv:
+                    if detection_result.pose_landmarks:
+                        # A pose was detected, write the landmark data
+                        landmarks_count += csv_writer.write_landmarks(
+                            detection_result.pose_landmarks[0],
+                            frame_idx=frame_idx,
+                            timestamp_ms=timestamp_ms,
+                            width=width,
+                            height=height
+                        )
+                    else:
+                        # NO pose was detected, write a placeholder row
+                        # We write one row for landmark_id 0 with NaN values to signify no data
+                        self.logger.warning(f"No pose detected in frame {frame_idx}. Writing placeholder.")
+                        csv_writer.writer.writerow([
+                            frame_idx,
+                            timestamp_ms,
+                            0,  # landmark_id
+                            float('nan'), # x_norm
+                            float('nan'), # y_norm
+                            float('nan'), # z_norm
+                            0.0,          # visibility
+                            -1,           # x_px
+                            -1            # y_px
+                        ])
+    
+
                 if self.config.save_annotated:
                     annotated_rgb = frame_rgb.copy()
                     
