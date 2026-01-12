@@ -1,7 +1,10 @@
 {
-  "model_path": "models/pose_landmarker_heavy.task",
-  "output_dir": "data/output",
-  "input_paths": [
+  "metadata": {
+    "generated_at": "2026-01-09T16:57:29.228595",
+    "total_videos": 1557,
+    "source_directory": "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples"
+  },
+  "video_files": [
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA000\\FGS\\PA000_FGS_WJ_1_DensePose\\PA000_FGS_WJ_1_DensePose.mp4",
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA000\\FGS\\PA000_FGS_WJ_2_DensePose\\PA000_FGS_WJ_2_DensePose.mp4",
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA000\\FGS\\PA000_FGS_WoJ_1_DensePose\\PA000_FGS_WoJ_1_DensePose.mp4",
@@ -1559,28 +1562,5 @@
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA200\\UGS\\PA200_UGS_WJ_2_DensePose\\PA200_UGS_WJ_2_DensePose.mp4",
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA200\\UGS\\PA200_UGS_WoJ_1_DensePose\\PA200_UGS_WoJ_1_DensePose.mp4",
     "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples\\PA200\\UGS\\PA200_UGS_WoJ_2_DensePose\\PA200_UGS_WoJ_2_DensePose.mp4"
-  ],
-  "batch_mode": true,
-  "save_annotated": true,
-  "save_csv": true,
-  "save_skeleton": true,
-  "auto_open": false,
-  "min_pose_detection_confidence": 0.5,
-  "min_pose_presence_confidence": 0.5,
-  "min_tracking_confidence": 0.5,
-  "num_poses": 1,
-  "landmark_color": [0, 255, 0],
-  "connection_color": [255, 0, 0],
-  "landmark_thickness": 2,
-  "connection_thickness": 2,
-  "landmark_radius": 2,
-  "skeleton_background_color": [0, 0, 0],
-  "skeleton_landmark_color": [0, 255, 0],
-  "skeleton_connection_color": [255, 0, 0],
-  "skeleton_landmark_thickness": 3,
-  "skeleton_connection_thickness": 2,
-  "skeleton_landmark_radius": 4,
-  "video_codec": "mp4v",
-  "image_extensions": [".jpg", ".jpeg", ".png", ".bmp"],
-  "video_extensions": [".mp4", ".mov", ".avi", ".mkv"]
+  ]
 }
