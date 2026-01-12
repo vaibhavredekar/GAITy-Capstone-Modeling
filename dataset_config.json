@@ -1,8 +1,0 @@
-{
-  "dataset_root": "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\dataset_samples",
-  "output_root": "C:\\Users\\lejaz\\spice_bootcamp\\GAITy-Capstone-Modeling\\data\\output\\dataset_samples",
-  "video_type": "from_images",
-  "overlay_skeleton": true,
-  "export_csv": true,
-  "fps": 30.0
-}
