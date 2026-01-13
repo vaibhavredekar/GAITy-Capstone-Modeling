@@ -2,10 +2,20 @@ import sqlite3
 import pandas as pd
 import re
 import logging
+import json
+import os
+import sys
+import time
+import threading
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, List, Tuple, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Tuple, Optional, Union, Any
+from dataclasses import dataclass, field
+from contextlib import contextmanager
+import hashlib
+import signal
+import psutil
+from pydantic import BaseModel, Field, field_validator
 
 @dataclass
 class FileMetadata:
@@ -17,11 +27,64 @@ class FileMetadata:
     model_name: Optional[str]
     original_filename: str
 
-class CSVDatabaseProcessor:
-    """Single-threaded CSV to SQLite database processor with integrated diagnostics"""
+class ProcessingMetrics:
+    """Track processing metrics for monitoring"""
+    def __init__(self):
+        self.start_time = time.time()
+        self.files_processed = 0
+        self.files_failed = 0
+        self.rows_processed = 0
+        self.processing_time = 0
+        self.lock = threading.Lock()
     
-    # Filename pattern regex
-    FILENAME_PATTERN = re.compile(
+    def increment_files_processed(self):
+        with self.lock:
+            self.files_processed += 1
+    
+    def increment_files_failed(self):
+        with self.lock:
+            self.files_failed += 1
+    
+    def add_rows_processed(self, count):
+        with self.lock:
+            self.rows_processed += count
+    
+    def get_metrics(self):
+        with self.lock:
+            return {
+                "files_processed": self.files_processed,
+                "files_failed": self.files_failed,
+                "rows_processed": self.rows_processed,
+                "processing_time": time.time() - self.start_time,
+                "memory_usage_mb": psutil.Process().memory_info().rss / (1024 * 1024)
+            }
+
+class ConfigModel(BaseModel):
+    """Configuration model with validation"""
+    db_path: str = Field(..., description="Path to SQLite database")
+    log_path: str = Field("processing.log", description="Path to log file")
+    log_level: str = Field("INFO", description="Logging level")
+    semantic_dir: Optional[str] = Field(None, description="Path to semantic segmentation CSV files")
+    seq_dir: Optional[str] = Field(None, description="Path to seq-based CSV files")
+    summary_file_path: Optional[str] = Field(None, description="Path to merged summary Excel file")
+    chunk_size: int = Field(1000, description="Chunk size for database inserts")
+    retry_attempts: int = Field(3, description="Number of retry attempts for failed operations")
+    retry_delay: float = Field(1.0, description="Delay between retries in seconds")
+    use_parallel: bool = Field(False, description="Whether to use parallel processing (may affect order)")
+    
+    @field_validator('log_level')
+    @classmethod
+    def validate_log_level(cls, v):
+        valid_levels = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        if v.upper() not in valid_levels:
+            raise ValueError(f'log_level must be one of {valid_levels}')
+        return v.upper()
+
+class EnhancedCSVDatabaseProcessor:
+    """Production-grade CSV to SQLite database processor with column merging"""
+    
+    # Filename pattern regex for semantic segmentation files
+    SEMANTIC_PATTERN = re.compile(
         r'semantic_segmentation_'
         r'(?P<patient>[A-Z]+\d+)_'
         r'(?P<movement>FGS|UGS)_'
@@ -30,79 +93,210 @@ class CSVDatabaseProcessor:
         r'(?P<model>[^_]+)_landmarks'
     )
     
-    def __init__(self, db_path: str = "landmark_database.db", log_path: str = "processing.log"):
-        """Initialize processor with database and log paths"""
-        self.db_path = Path(db_path)
-        self.log_path = Path(log_path)
+    # Simple pattern to extract seq hash from beginning of filename
+    SEQ_PATTERN = re.compile(r'^(cljar[a-z0-9]+)_')
+    
+    def __init__(self, config: Union[str, Dict, ConfigModel]):
+        """Initialize processor with configuration"""
+        # Load configuration
+        if isinstance(config, str):
+            self.config = self._load_config_from_file(config)
+        elif isinstance(config, dict):
+            self.config = ConfigModel(**config)
+        else:
+            self.config = config
+        
+        # Set up paths
+        self.db_path = Path(self.config.db_path)
+        self.log_path = Path(self.config.log_path)
+        
+        # Initialize metrics
+        self.metrics = ProcessingMetrics()
+        
+        # Set up logging
         self._setup_logging()
         
+        # Track processed files for diagnostics
+        self.processed_files = []
+        
+        # Set up signal handlers for graceful shutdown
+        signal.signal(signal.SIGINT, self._handle_signal)
+        signal.signal(signal.SIGTERM, self._handle_signal)
+        
+        # Flag for graceful shutdown
+        self.shutdown_requested = False
+        
+        self.logger.info(f"Processor initialized with config: {self.config.model_dump()}")
+    
+    def _handle_signal(self, signum, frame):
+        """Handle shutdown signals gracefully"""
+        self.logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        self.shutdown_requested = True
+    
+    def _load_config_from_file(self, config_file: str) -> ConfigModel:
+        """Load configuration from JSON file"""
+        try:
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            return ConfigModel(**config_data)
+        except Exception as e:
+            self.logger.error(f"Failed to load config from {config_file}: {e}")
+            raise
+    
     def _setup_logging(self):
         """Configure comprehensive logging"""
-        logging.basicConfig(
-            level=logging.INFO,
-            format='%(asctime)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(self.log_path, mode='a', encoding='utf-8'),
-                logging.StreamHandler()
-            ]
-        )
+        # Create logger
         self.logger = logging.getLogger(__name__)
-        self.logger.info(f"=" * 80)
-        self.logger.info(f"Processing session started")
-        self.logger.info(f"=" * 80)
+        self.logger.setLevel(getattr(logging, self.config.log_level))
         
+        # Clear existing handlers
+        self.logger.handlers.clear()
+        
+        # File handler with human-readable format
+        file_handler = logging.FileHandler(self.log_path, mode='a', encoding='utf-8')
+        file_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s'
+        )
+        file_handler.setFormatter(file_formatter)
+        self.logger.addHandler(file_handler)
+        
+        # Console handler with human-readable format
+        console_handler = logging.StreamHandler()
+        console_formatter = logging.Formatter(
+            '%(asctime)s - %(levelname)s - %(message)s'
+        )
+        console_handler.setFormatter(console_formatter)
+        self.logger.addHandler(console_handler)
+        
+        # Log initialization
+        self.logger.info("=" * 80)
+        self.logger.info("Processing session started")
+        self.logger.info("=" * 80)
+    
+    @contextmanager
+    def _db_connection(self, timeout=30.0):
+        """Context manager for database connections with retry logic"""
+        attempts = 0
+        last_error = None
+        
+        while attempts < self.config.retry_attempts and not self.shutdown_requested:
+            try:
+                conn = sqlite3.connect(
+                    self.db_path, 
+                    timeout=timeout,
+                    check_same_thread=False
+                )
+                conn.execute("PRAGMA journal_mode=WAL")  # Enable WAL mode for better concurrency
+                conn.execute("PRAGMA synchronous=NORMAL")  # Balance between safety and performance
+                yield conn
+                conn.close()
+                return
+            except sqlite3.Error as e:
+                last_error = e
+                attempts += 1
+                self.logger.warning(f"Database connection attempt {attempts} failed: {e}")
+                if attempts < self.config.retry_attempts:
+                    time.sleep(self.config.retry_delay * attempts)  # Exponential backoff
+        
+        if last_error:
+            raise last_error
+        else:
+            raise Exception("Shutdown requested during database connection")
+    
     def _create_database_schema(self):
-        """Create database schema"""
-        with sqlite3.connect(self.db_path) as conn:
+        """Create database schema with merged columns"""
+        self.logger.info("Creating database schema...")
+        
+        with self._db_connection() as conn:
             cursor = conn.cursor()
             
-            # Drop tables if they exist to start fresh
-            cursor.execute("DROP TABLE IF EXISTS landmarks")
-            cursor.execute("DROP TABLE IF EXISTS processing_log")
-            
-            # Main landmarks table
+            # Check if table exists to preserve data
             cursor.execute("""
-                CREATE TABLE landmarks (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    patient_name TEXT,
-                    frame INTEGER,
-                    movement_type TEXT,
-                    jacket_status TEXT,
-                    side TEXT,
-                    model_name TEXT,
-                    timestamp_ms REAL,
-                    landmark_id INTEGER,
-                    x_norm REAL,
-                    y_norm REAL,
-                    z_norm REAL,
-                    visibility REAL,
-                    x_px REAL,
-                    y_px REAL,
-                    source_file TEXT NOT NULL,
-                    file_order INTEGER NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
+                SELECT name FROM sqlite_master 
+                WHERE type='table' AND name='landmarks'
             """)
             
-            # Processing log table
-            cursor.execute("""
-                CREATE TABLE processing_log (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    filename TEXT UNIQUE NOT NULL,
-                    file_order INTEGER NOT NULL,
-                    status TEXT NOT NULL,
-                    rows_processed INTEGER,
-                    error_message TEXT,
-                    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            conn.commit()
+            if not cursor.fetchone():
+                # Create new table if it doesn't exist
+                cursor.execute("""
+                    CREATE TABLE landmarks (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        patient_name TEXT,           -- Merged: semantic patient_name OR seq
+                        frame INTEGER,
+                        movement_type TEXT,         -- Merged: semantic movement_type OR video_speed
+                        jacket_status TEXT,
+                        side TEXT,                  -- Merged: semantic side OR cam_view
+                        model_name TEXT,
+                        timestamp_ms REAL,
+                        landmark_id INTEGER,
+                        x_norm REAL,
+                        y_norm REAL,
+                        z_norm REAL,
+                        visibility REAL,
+                        x_px REAL,
+                        y_px REAL,
+                        source_file TEXT NOT NULL,
+                        file_order INTEGER NOT NULL,
+                        file_path TEXT,             -- Full path to source file
+                        -- Additional columns from merged_summary
+                        start_frame INTEGER,
+                        end_frame INTEGER,
+                        url TEXT,
+                        gait_event TEXT,
+                        dataset TEXT,
+                        gait_pattern TEXT,
+                        add_pattern_info TEXT,
+                        title TEXT,
+                        uploader TEXT,
+                        fps REAL,
+                        start_time TEXT,
+                        end_time TEXT,
+                        duration REAL,
+                        checksum TEXT,
+                        width INTEGER,
+                        height INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Create processing log table with extended info
+                cursor.execute("""
+                    CREATE TABLE processing_log (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        filename TEXT UNIQUE NOT NULL,
+                        file_path TEXT NOT NULL,
+                        file_order INTEGER NOT NULL,
+                        status TEXT NOT NULL,
+                        rows_processed INTEGER,
+                        error_message TEXT,
+                        seq_matched TEXT,
+                        data_source TEXT,           -- 'SEMANTIC' or 'SEQ'
+                        processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                
+                # Create metrics table
+                cursor.execute("""
+                    CREATE TABLE processing_metrics (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        files_processed INTEGER,
+                        files_failed INTEGER,
+                        rows_processed INTEGER,
+                        processing_time REAL,
+                        memory_usage_mb REAL
+                    )
+                """)
+                
+                conn.commit()
+                self.logger.info("✓ Database schema created successfully")
+            else:
+                self.logger.info("✓ Database already exists, preserving data")
     
-    def _parse_filename(self, filename: str) -> FileMetadata:
-        """Extract metadata from filename"""
+    def _parse_semantic_filename(self, filename: str) -> FileMetadata:
+        """Extract metadata from semantic segmentation filename"""
         name_without_ext = filename.rsplit('.', 1)[0]
-        match = self.FILENAME_PATTERN.search(name_without_ext)
+        match = self.SEMANTIC_PATTERN.search(name_without_ext)
         
         if match:
             groups = match.groupdict()
@@ -120,7 +314,7 @@ class CSVDatabaseProcessor:
                 original_filename=filename
             )
         else:
-            self.logger.warning(f"Could not parse filename: {filename}")
+            self.logger.warning(f"Could not parse semantic filename: {filename}")
             return FileMetadata(
                 patient_name=None,
                 movement_type=None,
@@ -130,17 +324,39 @@ class CSVDatabaseProcessor:
                 original_filename=filename
             )
     
+    def _extract_seq_from_filename(self, filename: str) -> Optional[str]:
+        """
+        Extract seq hash identifier from filename
+        
+        CRITICAL: Extracts ONLY the seq hash (e.g., cljar9bqo00c43n6l2u5zmlru)
+        from the beginning of the filename before the first underscore
+        
+        Example:
+            Input: 'cljar9bqo00c43n6l2u5zmlru_left side_nan_Abnormal Gait_abnormal_landmarks.csv'
+            Output: 'cljar9bqo00c43n6l2u5zmlru'
+        """
+        name_without_ext = filename.rsplit('.', 1)[0]
+        match = self.SEQ_PATTERN.match(name_without_ext)
+        
+        if match:
+            seq_id = match.group(1)
+            self.logger.info(f"  ✓ Extracted seq hash: {seq_id}")
+            return seq_id
+        else:
+            self.logger.error(f"  ✗ Could not extract seq hash from: {filename}")
+            self.logger.error(f"     Filename must start with 'cljar' followed by alphanumeric characters")
+            return None
+    
     def _custom_sort_files(self, files: List[Path]) -> List[Path]:
-        """Custom sort to ensure WJ comes before WoJ"""
+        """Custom sort to ensure WJ comes before WoJ for semantic files"""
         def sort_key(file_path):
             filename = file_path.name
             
             # Parse the filename to extract components
-            match = self.FILENAME_PATTERN.search(filename)
+            match = self.SEMANTIC_PATTERN.search(filename)
             if match:
                 groups = match.groupdict()
                 
-                # Create a tuple for sorting
                 # WJ gets 0, WoJ gets 1 to ensure WJ comes first
                 jacket_priority = 0 if groups.get('jacket') == 'WJ' else 1
                 
@@ -158,10 +374,9 @@ class CSVDatabaseProcessor:
         
         sorted_files = sorted(files, key=sort_key)
         
-        # Debug: print the sorted order
-        self.logger.info("File sorting order:")
+        self.logger.info("Semantic files sorting order:")
         for i, file in enumerate(sorted_files):
-            self.logger.info(f"  {i}: {file.name}")
+            self.logger.info(f"  [{i+1}] {file.name}")
         
         return sorted_files
     
@@ -176,231 +391,651 @@ class CSVDatabaseProcessor:
         except:
             return str(value)
     
-    def process_directory(self, directory: str, pattern: str = "*.csv"):
+    def _load_merged_summary_data(self, summary_file_path: str) -> Tuple[pd.DataFrame, Dict]:
+        """Load and process the merged summary data"""
+        self.logger.info(f"Loading merged summary from: {summary_file_path}")
+        
+        try:
+            # Read the Excel file
+            summary_df = pd.read_excel(summary_file_path)
+            self.logger.info(f"  ✓ Loaded {len(summary_df)} rows")
+            
+            # Clean column names - remove trailing spaces
+            summary_df.columns = summary_df.columns.str.strip()
+            
+            # Log available columns
+            self.logger.info(f"  Columns: {', '.join(summary_df.columns)}")
+            
+            # CRITICAL: Verify 'seq' column exists
+            if 'seq' not in summary_df.columns:
+                self.logger.error("  ✗ CRITICAL: 'seq' column not found!")
+                self.logger.error(f"     Available columns: {list(summary_df.columns)}")
+                raise ValueError("Missing 'seq' column in merged_summary file")
+            
+            # Clean seq values - remove whitespace and convert to string
+            summary_df['seq'] = summary_df['seq'].astype(str).str.strip()
+            
+            # Create lookup dictionary
+            summary_lookup = {}
+            for _, row in summary_df.iterrows():
+                seq_key = row['seq']
+                summary_lookup[seq_key] = row.to_dict()
+            
+            self.logger.info(f"  ✓ Created lookup with {len(summary_lookup)} seq entries")
+            self.logger.info(f"  Sample seq hashes: {list(summary_lookup.keys())[:3]}")
+            
+            return summary_df, summary_lookup
+            
+        except Exception as e:
+            self.logger.error(f"  ✗ Error loading merged summary: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return pd.DataFrame(), {}
+    
+    def _validate_csv_structure(self, df: pd.DataFrame) -> Tuple[bool, Optional[str]]:
+        """Validate CSV has expected columns"""
+        required_columns = {
+            'frame', 'timestamp_ms', 'landmark_id', 
+            'x_norm', 'y_norm', 'z_norm', 'visibility', 'x_px', 'y_px'
+        }
+        
+        df_columns = set(df.columns)
+        missing_columns = required_columns - df_columns
+        
+        if missing_columns:
+            return False, f"Missing columns: {missing_columns}"
+        
+        if df.empty:
+            return False, "CSV file is empty"
+        
+        return True, None
+    
+    def _process_semantic_file(self, file_path: Path, file_order: int) -> Dict[str, Any]:
+        """Process a single semantic segmentation file"""
+        filename = file_path.name
+        full_path = str(file_path.absolute())
+        result = {
+            'filename': filename,
+            'full_path': full_path,
+            'file_order': file_order,
+            'rows': 0,
+            'status': 'SUCCESS',
+            'source': 'SEMANTIC',
+            'patient_name': None,
+            'error': None
+        }
+        
+        try:
+            self.logger.info(f"Processing: {filename}")
+            
+            # Parse filename
+            metadata = self._parse_semantic_filename(filename)
+            result['patient_name'] = metadata.patient_name
+            
+            # Read CSV
+            df = pd.read_csv(file_path)
+            
+            # Validate CSV structure
+            is_valid, error_msg = self._validate_csv_structure(df)
+            if not is_valid:
+                self.logger.warning(f"  ⚠ {error_msg} - adding missing columns")
+                required_columns = {
+                    'frame', 'timestamp_ms', 'landmark_id', 
+                    'x_norm', 'y_norm', 'z_norm', 'visibility', 'x_px', 'y_px'
+                }
+                for col in required_columns:
+                    if col not in df.columns:
+                        df[col] = None
+            
+            if df.empty:
+                self.logger.warning(f"  ⚠ CSV file is empty - skipping")
+                result['status'] = 'FAILED'
+                result['error'] = 'CSV file is empty'
+                return result
+            
+            # Add metadata from filename
+            df['patient_name'] = metadata.patient_name
+            df['movement_type'] = metadata.movement_type
+            df['jacket_status'] = metadata.jacket_status
+            df['side'] = metadata.side
+            df['model_name'] = metadata.model_name
+            df['source_file'] = filename
+            df['file_path'] = full_path
+            df['file_order'] = file_order
+            
+            # Initialize new columns with None
+            new_columns = [
+                'start_frame', 'end_frame', 'url', 'gait_event', 'dataset', 
+                'gait_pattern', 'add_pattern_info', 'title', 'uploader',
+                'fps', 'start_time', 'end_time', 'duration', 
+                'checksum', 'width', 'height'
+            ]
+            
+            for col in new_columns:
+                if col not in df.columns:
+                    df[col] = None
+            
+            # Insert into database
+            with self._db_connection() as conn:
+                # Insert in chunks
+                chunksize = self.config.chunk_size
+                rows_inserted = 0
+                
+                for i in range(0, len(df), chunksize):
+                    if self.shutdown_requested:
+                        result['status'] = 'FAILED'
+                        result['error'] = 'Processing interrupted by shutdown signal'
+                        return result
+                        
+                    chunk = df.iloc[i:i+chunksize]
+                    chunk.to_sql('landmarks', conn, if_exists='append', index=False)
+                    rows_inserted += len(chunk)
+                    conn.commit()
+                
+                result['rows'] = rows_inserted
+                
+                # Log to database
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO processing_log 
+                    (filename, file_path, file_order, status, rows_processed, error_message, seq_matched, data_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (filename, full_path, file_order, result['status'], rows_inserted, result['error'], None, result['source']))
+                conn.commit()
+            
+            self.logger.info(f"  ✓ SUCCESS: {rows_inserted:,} rows inserted")
+            self.metrics.increment_files_processed()
+            self.metrics.add_rows_processed(rows_inserted)
+            
+        except Exception as e:
+            result['status'] = 'FAILED'
+            result['error'] = str(e)
+            self.logger.error(f"  ✗ FAILED: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self.metrics.increment_files_failed()
+            
+            # Log failure to database
+            try:
+                with self._db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO processing_log 
+                        (filename, file_path, file_order, status, rows_processed, error_message, seq_matched, data_source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (filename, full_path, file_order, result['status'], 0, result['error'][:500], None, result['source']))
+                    conn.commit()
+            except:
+                pass
+        
+        return result
+    
+    def _process_seq_file(self, file_path: Path, file_order: int, summary_lookup: Dict) -> Dict[str, Any]:
+        """Process a single seq-based file"""
+        filename = file_path.name
+        full_path = str(file_path.absolute())
+        result = {
+            'filename': filename,
+            'full_path': full_path,
+            'file_order': file_order,
+            'rows': 0,
+            'status': 'SUCCESS',
+            'source': 'SEQ',
+            'seq': None,
+            'gait_event': None,
+            'dataset': None,
+            'error': None
+        }
+        
+        try:
+            self.logger.info(f"Processing: {filename}")
+            
+            # Extract seq hash from filename
+            seq_id = self._extract_seq_from_filename(filename)
+            result['seq'] = seq_id
+            
+            if not seq_id:
+                result['status'] = 'FAILED'
+                result['error'] = "Could not extract seq hash from filename"
+                self.logger.error(f"  ✗ {result['error']}")
+                self.metrics.increment_files_failed()
+                return result
+            
+            # Match with summary
+            if seq_id not in summary_lookup:
+                result['status'] = 'FAILED'
+                result['error'] = f"seq '{seq_id}' not found in merged_summary"
+                self.logger.error(f"  ✗ {result['error']}")
+                self.logger.error(f"     Available seq samples: {list(summary_lookup.keys())[:5]}")
+                self.metrics.increment_files_failed()
+                return result
+            
+            matched_summary = summary_lookup[seq_id]
+            result['gait_event'] = matched_summary.get('gait_event')
+            result['dataset'] = matched_summary.get('dataset')
+            
+            self.logger.info(f"  ✓ Matched with seq: {seq_id}")
+            
+            # Read CSV
+            df = pd.read_csv(file_path)
+            
+            # Validate CSV structure
+            is_valid, error_msg = self._validate_csv_structure(df)
+            if not is_valid:
+                self.logger.warning(f"  ⚠ {error_msg} - adding missing columns")
+                required_columns = {
+                    'frame', 'timestamp_ms', 'landmark_id', 
+                    'x_norm', 'y_norm', 'z_norm', 'visibility', 'x_px', 'y_px'
+                }
+                for col in required_columns:
+                    if col not in df.columns:
+                        df[col] = None
+            
+            if df.empty:
+                self.logger.warning(f"  ⚠ CSV file is empty - skipping")
+                result['status'] = 'FAILED'
+                result['error'] = 'CSV file is empty'
+                self.metrics.increment_files_failed()
+                return result
+            
+            # COLUMN MERGING: Map summary to landmark columns
+            df['patient_name'] = matched_summary.get('seq')
+            df['movement_type'] = matched_summary.get('Video_Speed')  # Note: Changed from video_speed to Video_Speed
+            df['side'] = matched_summary.get('cam_view')
+            
+            # Add file metadata
+            df['source_file'] = filename
+            df['file_path'] = full_path
+            df['file_order'] = file_order
+            
+            # Add new columns from summary
+            new_columns_mapping = {
+                'start_frame': 'start_frame',
+                'end_frame': 'end_frame',
+                'url': 'url',
+                'gait_event': 'gait_event',
+                'dataset': 'dataset',
+                'gait_pattern': 'gait_pattern',
+                'add_pattern_info': 'add_pattern_info',
+                'title': 'title',
+                'uploader': 'uploader',
+                'fps': 'fps',
+                'start_time': 'start_time',
+                'end_time': 'end_time',
+                'duration': 'duration',
+                'checksum': 'checksum',
+                'width': 'width',
+                'height': 'height'
+            }
+            
+            for db_col, summary_col in new_columns_mapping.items():
+                df[db_col] = matched_summary.get(summary_col)
+            
+            # Ensure required columns exist
+            for col in ['jacket_status', 'model_name']:
+                if col not in df.columns:
+                    df[col] = None
+            
+            # Insert into database
+            with self._db_connection() as conn:
+                # Insert in chunks
+                chunksize = self.config.chunk_size
+                rows_inserted = 0
+                
+                for i in range(0, len(df), chunksize):
+                    if self.shutdown_requested:
+                        result['status'] = 'FAILED'
+                        result['error'] = 'Processing interrupted by shutdown signal'
+                        return result
+                        
+                    chunk = df.iloc[i:i+chunksize]
+                    chunk.to_sql('landmarks', conn, if_exists='append', index=False)
+                    rows_inserted += len(chunk)
+                    conn.commit()
+                
+                result['rows'] = rows_inserted
+                
+                # Log to database
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT OR REPLACE INTO processing_log 
+                    (filename, file_path, file_order, status, rows_processed, error_message, seq_matched, data_source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (filename, full_path, file_order, result['status'], rows_inserted, result['error'], seq_id, result['source']))
+                conn.commit()
+            
+            self.logger.info(f"  ✓ SUCCESS: {rows_inserted:,} rows inserted")
+            self.metrics.increment_files_processed()
+            self.metrics.add_rows_processed(rows_inserted)
+            
+        except Exception as e:
+            result['status'] = 'FAILED'
+            result['error'] = str(e)
+            self.logger.error(f"  ✗ FAILED: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            self.metrics.increment_files_failed()
+            
+            # Log failure to database
+            try:
+                with self._db_connection() as conn:
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT OR REPLACE INTO processing_log 
+                        (filename, file_path, file_order, status, rows_processed, error_message, seq_matched, data_source)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (filename, full_path, file_order, result['status'], 0, result['error'][:500], result['seq'], result['source']))
+                    conn.commit()
+            except:
+                pass
+        
+        return result
+    
+    def process_semantic_directory(self, directory: str, pattern: str = "*.csv", 
+                                  start_file_order: int = 0):
         """
-        Process all CSV files sequentially in a single thread
+        Process all semantic segmentation CSV files with custom sorting
         
         Args:
             directory: Path to CSV files
             pattern: File pattern to match
+            start_file_order: Starting file order number
         """
         dir_path = Path(directory)
         
         if not dir_path.exists():
-            self.logger.error(f"Directory not found: {directory}")
-            return
+            self.logger.error(f"✗ Directory not found: {directory}")
+            return 0, 0, 0
         
         # Find all CSV files
         csv_files = list(dir_path.glob(pattern))
         total_files = len(csv_files)
         
         if total_files == 0:
-            self.logger.warning(f"No CSV files found in {directory}")
-            return
+            self.logger.warning(f"⚠ No CSV files found in {directory}")
+            return 0, 0, 0
         
         # Apply custom sorting
         csv_files = self._custom_sort_files(csv_files)
         
-        self.logger.info(f"Found {total_files} CSV files to process")
+        self.logger.info(f"\n{'=' * 80}")
+        self.logger.info(f"Found {total_files} semantic CSV files to process")
+        self.logger.info(f"{'=' * 80}")
         
-        # Create database schema
-        self._create_database_schema()
-        
-        # Process files sequentially
+        # Process files sequentially to maintain order
         successful = 0
         failed = 0
         total_rows = 0
         
-        with sqlite3.connect(self.db_path) as conn:
-            for file_order, file_path in enumerate(csv_files):
-                filename = file_path.name
+        for i, file_path in enumerate(csv_files):
+            if self.shutdown_requested:
+                self.logger.info("Shutdown requested, stopping processing...")
+                break
                 
-                try:
-                    self.logger.info(f"Processing file {file_order+1}/{total_files}: {filename}")
-                    
-                    # Parse filename
-                    metadata = self._parse_filename(filename)
-                    self.logger.info(f"  Parsed: Patient={metadata.patient_name}, "
-                                   f"Movement={metadata.movement_type}, "
-                                   f"Jacket={metadata.jacket_status}, "
-                                   f"Side={metadata.side}")
-                    
-                    # Read CSV - don't skip any rows
-                    df = pd.read_csv(file_path)
-                    self.logger.info(f"  Read {len(df)} rows from CSV")
-                    
-                    # Check for required columns but don't fail if missing
-                    required_columns = {
-                        'frame', 'timestamp_ms', 'landmark_id', 
-                        'x_norm', 'y_norm', 'z_norm', 'visibility', 'x_px', 'y_px'
-                    }
-                    
-                    df_columns = set(df.columns)
-                    missing_columns = required_columns - df_columns
-                    
-                    if missing_columns:
-                        self.logger.warning(f"  Missing columns: {missing_columns}")
-                        # Add missing columns with NaN values
-                        for col in missing_columns:
-                            df[col] = None
-                    
-                    if df.empty:
-                        self.logger.warning(f"  CSV file is empty")
-                        failed += 1
-                        continue
-                    
-                    # Add metadata
-                    df['patient_name'] = metadata.patient_name
-                    df['movement_type'] = metadata.movement_type
-                    df['jacket_status'] = metadata.jacket_status
-                    df['side'] = metadata.side
-                    df['model_name'] = metadata.model_name
-                    df['source_file'] = filename
-                    df['file_order'] = file_order
-                    
-                    # Reorder columns
-                    column_order = [
-                        'patient_name', 'frame', 'movement_type', 'jacket_status', 
-                        'side', 'model_name', 'timestamp_ms', 'landmark_id',
-                        'x_norm', 'y_norm', 'z_norm', 'visibility', 'x_px', 'y_px',
-                        'source_file', 'file_order'
-                    ]
-                    
-                    # Ensure all columns exist
-                    for col in column_order:
-                        if col not in df.columns:
-                            df[col] = None
-                    
-                    df = df[column_order]
-                    
-                    # Insert into database - use smaller chunksize and no method='multi'
-                    chunksize = 1000  # Reduced chunksize
-                    rows_inserted = 0
-                    
-                    # Split dataframe into chunks
-                    for i in range(0, len(df), chunksize):
-                        chunk = df.iloc[i:i+chunksize]
-                        # Remove method='multi' to avoid SQL variables error
-                        chunk.to_sql('landmarks', conn, if_exists='append', index=False)
-                        rows_inserted += len(chunk)
-                        conn.commit()  # Commit after each chunk
-                    
-                    total_rows += rows_inserted
-                    successful += 1
-                    
-                    # Log success
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT OR IGNORE INTO processing_log 
-                        (filename, file_order, status, rows_processed, error_message)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (filename, file_order, 'SUCCESS', rows_inserted, None))
-                    conn.commit()
-                    
-                    self.logger.info(f"  Successfully processed {filename}: {rows_inserted} rows inserted")
-                    
-                except Exception as e:
-                    failed += 1
-                    error_msg = str(e)
-                    self.logger.error(f"  Failed to process {filename}: {error_msg}")
-                    import traceback
-                    self.logger.error(traceback.format_exc())
-                    
-                    # Log failure
-                    try:
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT OR IGNORE INTO processing_log 
-                            (filename, file_order, status, rows_processed, error_message)
-                            VALUES (?, ?, ?, ?, ?)
-                        """, (filename, file_order, 'FAILED', 0, error_msg))
-                        conn.commit()
-                    except:
-                        pass
+            file_order = start_file_order + i
+            result = self._process_semantic_file(file_path, file_order)
+            self.processed_files.append(result)
+            
+            if result['status'] == 'SUCCESS':
+                successful += 1
+                total_rows += result['rows']
+            else:
+                failed += 1
         
-        # Create indexes on final database
-        self.logger.info("Creating indexes on database...")
-        with sqlite3.connect(self.db_path) as conn:
+        # Create indexes
+        self.logger.info("\nCreating database indexes...")
+        with self._db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_file_order 
-                ON landmarks(file_order)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_patient_frame 
-                ON landmarks(patient_name, frame)
-            """)
-            cursor.execute("""
-                CREATE INDEX IF NOT EXISTS idx_source_file 
-                ON landmarks(source_file)
-            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_order ON landmarks(file_order)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_patient_frame ON landmarks(patient_name, frame)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_file ON landmarks(source_file)")
             conn.commit()
         
-        # Summary report
+        # Summary
         self.logger.info(f"\n{'=' * 80}")
-        self.logger.info(f"PROCESSING SUMMARY")
+        self.logger.info(f"SEMANTIC PROCESSING COMPLETE")
         self.logger.info(f"{'=' * 80}")
         self.logger.info(f"Total files: {total_files}")
-        self.logger.info(f"Successful: {successful}")
-        self.logger.info(f"Failed: {failed}")
-        self.logger.info(f"Total rows inserted: {total_rows:,}")
+        self.logger.info(f"✓ Successful: {successful}")
+        self.logger.info(f"✗ Failed: {failed}")
+        self.logger.info(f"Total rows: {total_rows:,}")
         self.logger.info(f"{'=' * 80}")
         
-        # Run comprehensive diagnostics after processing
+        return successful, failed, total_rows
+    
+    def process_seq_directory(self, directory: str, pattern: str = "*.csv", 
+                             summary_file_path: str = None,
+                             start_file_order: int = 0):
+        """
+        Process seq-based CSV files in natural order (NO SORTING - F1→F2→F3→...→Fn)
+        Matches files to merged_summary using seq hash extracted from filename
+        
+        Args:
+            directory: Path to CSV files
+            pattern: File pattern to match
+            summary_file_path: Path to the merged summary Excel file
+            start_file_order: Starting file order number
+        """
+        dir_path = Path(directory)
+        
+        if not dir_path.exists():
+            self.logger.error(f"✗ Directory not found: {directory}")
+            return 0, 0, 0
+        
+        # Load merged summary data
+        if not summary_file_path or not Path(summary_file_path).exists():
+            self.logger.error(f"✗ Summary file not found: {summary_file_path}")
+            return 0, 0, 0
+        
+        summary_data, summary_lookup = self._load_merged_summary_data(summary_file_path)
+        if not summary_lookup:
+            self.logger.error("✗ Failed to load summary data - cannot proceed")
+            return 0, 0, 0
+        
+        # Find all CSV files
+        csv_files = list(dir_path.glob(pattern))
+        total_files = len(csv_files)
+        
+        if total_files == 0:
+            self.logger.warning(f"⚠ No CSV files found in {directory}")
+            return 0, 0, 0
+        
+        # Sort only alphabetically for consistent ordering (NO CUSTOM SORTING)
+        csv_files = sorted(csv_files, key=lambda x: x.name)
+        
+        self.logger.info(f"\n{'=' * 80}")
+        self.logger.info(f"Found {total_files} seq-based CSV files")
+        self.logger.info(f"Processing in sequential order (F1→F2→F3→...)")
+        self.logger.info(f"{'=' * 80}")
+        
+        # Show file order
+        self.logger.info("\nSeq files processing order:")
+        for i, file in enumerate(csv_files):
+            self.logger.info(f"  [{i+1}] {file.name}")
+        
+        # Process files sequentially to maintain order
+        successful = 0
+        failed = 0
+        total_rows = 0
+        match_failures = []
+        
+        for i, file_path in enumerate(csv_files):
+            if self.shutdown_requested:
+                self.logger.info("Shutdown requested, stopping processing...")
+                break
+                
+            file_order = start_file_order + i
+            result = self._process_seq_file(file_path, file_order, summary_lookup)
+            self.processed_files.append(result)
+            
+            if result['status'] == 'SUCCESS':
+                successful += 1
+                total_rows += result['rows']
+            else:
+                failed += 1
+                if 'seq' in result and result['seq']:
+                    match_failures.append({
+                        'filename': result['filename'],
+                        'issue': 'SEQ_NOT_IN_SUMMARY' if 'not found' in result.get('error', '') else 'OTHER_ERROR',
+                        'seq': result['seq']
+                    })
+                else:
+                    match_failures.append({
+                        'filename': result['filename'],
+                        'issue': 'NO_SEQ_EXTRACTED',
+                        'seq': None
+                    })
+        
+        # Create indexes
+        self.logger.info("\nCreating database indexes...")
+        with self._db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gait_event ON landmarks(gait_event)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_dataset ON landmarks(dataset)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_path ON landmarks(file_path)")
+            conn.commit()
+        
+        # Summary
+        self.logger.info(f"\n{'=' * 80}")
+        self.logger.info(f"SEQ PROCESSING COMPLETE")
+        self.logger.info(f"{'=' * 80}")
+        self.logger.info(f"Total files: {total_files}")
+        self.logger.info(f"✓ Successful: {successful}")
+        self.logger.info(f"✗ Failed: {failed}")
+        self.logger.info(f"Total rows: {total_rows:,}")
+        
+        if match_failures:
+            self.logger.warning(f"\n⚠️  Match Failures ({len(match_failures)}):")
+            for failure in match_failures:
+                self.logger.warning(f"  • {failure['filename']}")
+                self.logger.warning(f"    Issue: {failure['issue']}")
+                if failure['seq']:
+                    self.logger.warning(f"    Seq: {failure['seq']}")
+        
+        self.logger.info(f"{'=' * 80}")
+        
+        return successful, failed, total_rows
+    
+    def _record_metrics(self):
+        """Record current processing metrics to database"""
+        metrics = self.metrics.get_metrics()
+        
+        try:
+            with self._db_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO processing_metrics 
+                    (files_processed, files_failed, rows_processed, processing_time, memory_usage_mb)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    metrics['files_processed'],
+                    metrics['files_failed'],
+                    metrics['rows_processed'],
+                    metrics['processing_time'],
+                    metrics['memory_usage_mb']
+                ))
+                conn.commit()
+        except Exception as e:
+            self.logger.error(f"Failed to record metrics: {e}")
+    
+    def process_all_sources(self, semantic_dir: str = None, seq_dir: str = None,
+                           summary_file_path: str = None):
+        """
+        Process both semantic and seq-based CSV files
+        
+        Args:
+            semantic_dir: Path to semantic segmentation CSV files
+            seq_dir: Path to seq-based CSV files
+            summary_file_path: Path to merged summary Excel file
+        """
+        # Create database schema
+        if not self.db_path.exists():
+            self._create_database_schema()
+        
+        total_successful = 0
+        total_failed = 0
+        total_rows = 0
+        next_file_order = 0
+        
+        # Record initial metrics
+        self._record_metrics()
+        
+        # Process semantic files
+        if semantic_dir:
+            self.logger.info("\n" + "=" * 80)
+            self.logger.info("STAGE 1: PROCESSING SEMANTIC SEGMENTATION FILES")
+            self.logger.info("=" * 80)
+            
+            successful, failed, rows = self.process_semantic_directory(
+                directory=semantic_dir,
+                start_file_order=next_file_order
+            )
+            
+            total_successful += successful
+            total_failed += failed
+            total_rows += rows
+            next_file_order += successful + failed
+            
+            # Record metrics after semantic processing
+            self._record_metrics()
+        
+        # Process seq files
+        if seq_dir and not self.shutdown_requested:
+            self.logger.info("\n" + "=" * 80)
+            self.logger.info("STAGE 2: PROCESSING SEQ-BASED FILES")
+            self.logger.info("=" * 80)
+            
+            successful, failed, rows = self.process_seq_directory(
+                directory=seq_dir,
+                summary_file_path=summary_file_path,
+                start_file_order=next_file_order
+            )
+            
+            total_successful += successful
+            total_failed += failed
+            total_rows += rows
+            
+            # Record final metrics
+            self._record_metrics()
+        
+        # Final summary
+        self.logger.info("\n" + "=" * 80)
+        self.logger.info("PROCESSING COMPLETE")
+        self.logger.info("=" * 80)
+        self.logger.info(f"Total files processed: {total_successful + total_failed}")
+        self.logger.info(f"  ✓ Successful: {total_successful}")
+        self.logger.info(f"  ✗ Failed: {total_failed}")
+        self.logger.info(f"Total rows inserted: {total_rows:,}")
+        self.logger.info(f"Database: {self.db_path.absolute()}")
+        self.logger.info(f"Log file: {self.log_path.absolute()}")
+        self.logger.info("=" * 80)
+        
+        # Run diagnostics
         self.run_comprehensive_diagnostics()
+        
+        return total_successful, total_failed, total_rows
     
     def run_comprehensive_diagnostics(self):
-        """Run comprehensive database diagnostics after processing"""
+        """Run comprehensive diagnostics with detailed file tracking"""
         print("\n" + "=" * 80)
-        print("RUNNING COMPREHENSIVE DATABASE DIAGNOSTICS")
+        print("COMPREHENSIVE DATABASE DIAGNOSTICS")
         print("=" * 80)
         
         if not self.db_path.exists():
-            print(f"❌ Database file not found: {self.db_path}")
+            print(f"❌ Database not found: {self.db_path}")
             return
         
-        with sqlite3.connect(self.db_path) as conn:
+        with self._db_connection() as conn:
             cursor = conn.cursor()
             
-            # 1. Database file info
+            # === SECTION 1: DATABASE INFO ===
             db_size_mb = round(self.db_path.stat().st_size / (1024 * 1024), 2)
-            print(f"\n📁 Database file: {self.db_path}")
-            print(f"📊 Database size: {db_size_mb} MB")
+            print(f"\n{'=' * 80}")
+            print(f"1. DATABASE INFORMATION")
+            print(f"{'=' * 80}")
+            print(f"📁 File: {self.db_path}")
+            print(f"📊 Size: {db_size_mb} MB")
             
-            # 2. Table existence check
-            cursor.execute("""
-                SELECT name FROM sqlite_master 
-                WHERE type='table' AND name IN ('landmarks', 'processing_log')
-            """)
-            tables = [row[0] for row in cursor.fetchall()]
-            
-            print(f"\n📋 Tables found: {tables}")
-            
-            if 'landmarks' not in tables:
-                print("❌ landmarks table missing!")
-                return
-            
-            # 3. Table schema
-            cursor.execute("PRAGMA table_info(landmarks)")
-            columns = cursor.fetchall()
-            
-            print(f"\n📝 landmarks table schema ({len(columns)} columns):")
-            for col in columns:
-                nullable = "NULL" if col[3] == 0 else "NOT NULL"
-                default = f" DEFAULT {col[4]}" if col[4] is not None else ""
-                print(f"  • {col[1]} ({col[2]}) {nullable}{default}")
-            
-            # 4. Check for critical columns
-            critical_columns = ['id', 'patient_name', 'file_order', 'jacket_status', 'frame', 'landmark_id']
-            existing_columns = [col[1] for col in columns]
-            missing_critical = [col for col in critical_columns if col not in existing_columns]
-            
-            if missing_critical:
-                print(f"\n❌ Missing critical columns: {missing_critical}")
-            else:
-                print(f"\n✅ All critical columns present")
-            
-            # 5. Row counts and statistics
             cursor.execute("SELECT COUNT(*) FROM landmarks")
             total_rows = cursor.fetchone()[0]
             
@@ -410,348 +1045,201 @@ class CSVDatabaseProcessor:
             cursor.execute("SELECT COUNT(DISTINCT patient_name) FROM landmarks WHERE patient_name IS NOT NULL")
             unique_patients = cursor.fetchone()[0]
             
-            print(f"\n📈 Database statistics:")
-            print(f"  • Total rows: {total_rows:,}")
-            print(f"  • Unique files: {unique_files}")
-            print(f"  • Unique patients: {unique_patients}")
+            print(f"📈 Total rows: {total_rows:,}")
+            print(f"📂 Unique files: {unique_files}")
+            print(f"👤 Unique patients/seqs: {unique_patients}")
             
-            # 6. File order verification
-            if 'file_order' in existing_columns:
-                print(f"\n🔢 File order verification:")
-                order_df = pd.read_sql_query("""
-                    SELECT 
-                        file_order,
-                        source_file,
-                        jacket_status,
-                        side,
-                        COUNT(*) as rows,
-                        MIN(id) as first_id,
-                        MAX(id) as last_id
-                    FROM landmarks
-                    GROUP BY file_order, source_file, jacket_status, side
+            # === SECTION 2: DATA ORDER VERIFICATION ===
+            print(f"\n{'=' * 80}")
+            print(f"2. DATA ORDER VERIFICATION")
+            print(f"{'=' * 80}")
+            
+            # Check if data is ordered by file_order
+            cursor.execute("""
+                SELECT file_order, MIN(id) as min_id, MAX(id) as max_id, COUNT(*) as rows
+                FROM landmarks
+                GROUP BY file_order
+                ORDER BY file_order
+            """)
+            
+            file_order_groups = cursor.fetchall()
+            
+            print(f"\nFile Order Groups:")
+            print(f"{'Order':<8} {'Min ID':<8} {'Max ID':<8} {'Rows':<8} {'Sequential':<12}")
+            print(f"{'-' * 50}")
+            
+            is_sequential = True
+            previous_max_id = 0
+            
+            for file_order, min_id, max_id, rows in file_order_groups:
+                sequential = "✓" if min_id > previous_max_id else "✗"
+                if sequential == "✗":
+                    is_sequential = False
+                print(f"{file_order:<8} {min_id:<8} {max_id:<8} {rows:<8} {sequential:<12}")
+                previous_max_id = max_id
+            
+            if is_sequential:
+                print(f"\n✓ Data is properly ordered by file_order")
+            else:
+                print(f"\n✗ WARNING: Data is NOT properly ordered by file_order!")
+                print(f"   This indicates files were processed out of sequence")
+            
+            # === SECTION 3: ALL PROCESSED FILES (IN ORDER) ===
+            print(f"\n{'=' * 80}")
+            print(f"3. ALL PROCESSED FILES (IN INSERTION ORDER)")
+            print(f"{'=' * 80}")
+            
+            cursor.execute("""
+                SELECT 
+                    file_order,
+                    filename,
+                    file_path,
+                    status,
+                    rows_processed,
+                    data_source,
+                    seq_matched
+                FROM processing_log
+                ORDER BY file_order
+            """)
+            
+            print(f"\n{'Order':<6} {'Status':<8} {'Source':<10} {'Rows':<10} {'Filename':<50} {'Seq/Patient':<30}")
+            print(f"{'-' * 130}")
+            
+            for row in cursor.fetchall():
+                file_order, filename, file_path, status, rows, source, seq = row
+                status_icon = "✓" if status == "SUCCESS" else "✗"
+                rows_str = f"{rows:,}" if rows else "0"
+                seq_str = seq if seq else "N/A"
+                
+                # Truncate long filenames
+                display_name = filename[:47] + "..." if len(filename) > 50 else filename
+                
+                print(f"{file_order:<6} {status_icon} {status:<6} {source:<10} {rows_str:<10} {display_name:<50} {seq_str:<30}")
+            
+            # === SECTION 4: FAILED FILES DETAIL ===
+            cursor.execute("SELECT COUNT(*) FROM processing_log WHERE status='FAILED'")
+            failed_count = cursor.fetchone()[0]
+            
+            if failed_count > 0:
+                print(f"\n{'=' * 80}")
+                print(f"4. FAILED FILES DETAIL")
+                print(f"{'=' * 80}")
+                
+                cursor.execute("""
+                    SELECT filename, file_path, error_message, seq_matched, data_source
+                    FROM processing_log
+                    WHERE status='FAILED'
                     ORDER BY file_order
-                """, conn)
+                """)
                 
-                for _, row in order_df.iterrows():
-                    print(f"  Order {row['file_order']}: {row['source_file']}")
-                    print(f"    → {row['jacket_status']}, {row['side']}")
-                    print(f"    → {row['rows']:,} rows (IDs: {row['first_id']}-{row['last_id']})")
-                
-                # 7. Order consistency check
-                print(f"\n🔍 Order consistency check:")
-                expected_order = ['With Jacket', 'With Jacket', 'Without Jacket', 'Without Jacket'] * 2
-                actual_order = order_df['jacket_status'].tolist()
-                
-                if actual_order == expected_order[:len(actual_order)]:
-                    print("✅ File order is correct (WJ before WoJ)")
-                else:
-                    print("❌ File order mismatch!")
-                    print(f"  Expected: {expected_order[:len(actual_order)]}")
-                    print(f"  Actual:   {actual_order}")
+                for i, row in enumerate(cursor.fetchall(), 1):
+                    filename, file_path, error, seq, source = row
+                    print(f"\n[{i}] {filename}")
+                    print(f"    Path: {file_path}")
+                    print(f"    Source: {source}")
+                    if seq:
+                        print(f"    Seq: {seq}")
+                    print(f"    Error: {error}")
             
-            # 8. Data integrity checks
-            print(f"\n🔒 Data integrity checks:")
+            # === SECTION 5: SAMPLE DATA VERIFICATION ===
+            print(f"\n{'=' * 80}")
+            print(f"5. SAMPLE DATA VERIFICATION")
+            print(f"{'=' * 80}")
             
-            # Check for null values in critical columns
-            for col in ['patient_name', 'frame', 'landmark_id']:
-                cursor.execute(f"SELECT COUNT(*) FROM landmarks WHERE {col} IS NULL")
-                null_count = cursor.fetchone()[0]
-                if null_count > 0:
-                    print(f"  ⚠️  {null_count:,} rows with NULL {col}")
-                else:
-                    print(f"  ✅ No NULL values in {col}")
+            # Show first 10 rows to verify order
+            cursor.execute("""
+                SELECT id, file_order, source_file, patient_name, frame
+                FROM landmarks
+                ORDER BY id
+                LIMIT 10
+            """)
             
-            # 9. Processing log analysis
-            if 'processing_log' in tables:
-                print(f"\n📋 Processing log analysis:")
-                log_df = pd.read_sql_query("""
-                    SELECT 
-                        status,
-                        COUNT(*) as count,
-                        SUM(rows_processed) as total_rows
-                    FROM processing_log
-                    GROUP BY status
-                """, conn)
-                
-                for _, row in log_df.iterrows():
-                    print(f"  • {row['status']}: {row['count']} files, {row['total_rows'] or 0:,} rows")
-                
-                # Show failed files if any
-                failed_df = pd.read_sql_query("""
-                    SELECT filename, error_message
-                    FROM processing_log
-                    WHERE status = 'FAILED'
-                """, conn)
-                
-                if not failed_df.empty:
-                    print(f"\n❌ Failed files:")
-                    for _, row in failed_df.iterrows():
-                        print(f"  • {row['filename']}: {row['error_message']}")
+            first_rows = cursor.fetchall()
+            if first_rows:
+                print(f"\nFirst 10 rows (by ID):")
+                print(f"{'ID':<6} {'Order':<8} {'Source':<30} {'Patient':<15} {'Frame':<8}")
+                print(f"{'-' * 75}")
+                for row in first_rows:
+                    id_val, file_order, source_file, patient_name, frame = row
+                    source_display = source_file[:27] + "..." if len(source_file) > 30 else source_file
+                    print(f"{id_val:<6} {file_order:<8} {source_display:<30} {patient_name:<15} {frame:<8}")
             
-            # 10. Sample data display
-            print(f"\n👀 Sample data (first 3 rows from each file):")
-            if 'file_order' in existing_columns:
-                for file_order in range(min(3, order_df['file_order'].max() + 1)):
-                    sample_df = pd.read_sql_query("""
-                        SELECT id, frame, landmark_id, x_norm, y_norm, visibility
-                        FROM landmarks
-                        WHERE file_order = ?
-                        ORDER BY id
-                        LIMIT 3
-                    """, conn, params=(file_order,))
-                    
-                    if not sample_df.empty:
-                        file_info = order_df[order_df['file_order'] == file_order].iloc[0]
-                        print(f"\n  File Order {file_order} ({file_info['jacket_status']}):")
-                        for _, row in sample_df.iterrows():
-                            # Use safe_format to handle None values
-                            print(f"    ID:{self._safe_format(row['id'], '>5')} "
-                                  f"Frame:{self._safe_format(row['frame'], '>4')} "
-                                  f"Landmark:{self._safe_format(row['landmark_id'], '>3')} "
-                                  f"X:{self._safe_format(row['x_norm'], '.3f', 'NaN')} "
-                                  f"Y:{self._safe_format(row['y_norm'], '.3f', 'NaN')} "
-                                  f"Vis:{self._safe_format(row['visibility'], '.3f', 'NaN')}")
+            # Show last 10 rows to verify order
+            cursor.execute("""
+                SELECT id, file_order, source_file, patient_name, frame
+                FROM landmarks
+                ORDER BY id DESC
+                LIMIT 10
+            """)
+            
+            last_rows = cursor.fetchall()
+            if last_rows:
+                print(f"\nLast 10 rows (by ID, reversed):")
+                print(f"{'ID':<6} {'Order':<8} {'Source':<30} {'Patient':<15} {'Frame':<8}")
+                print(f"{'-' * 75}")
+                for row in reversed(last_rows):
+                    id_val, file_order, source_file, patient_name, frame = row
+                    source_display = source_file[:27] + "..." if len(source_file) > 30 else source_file
+                    print(f"{id_val:<6} {file_order:<8} {source_display:<30} {patient_name:<15} {frame:<8}")
             
             print("\n" + "=" * 80)
             print("✅ DIAGNOSTICS COMPLETE")
             print("=" * 80)
-    
-    def test_filename_parsing(self, directory: str, pattern: str = "*.csv", sample_size: int = 10):
-        """Test filename parsing on sample files"""
-        dir_path = Path(directory)
-        csv_files = list(dir_path.glob(pattern))[:sample_size]
-        
-        print(f"\n{'=' * 80}")
-        print(f"TESTING FILENAME PARSING ON {len(csv_files)} FILES")
-        print(f"{'=' * 80}\n")
-        
-        # Test the custom sort
-        csv_files = self._custom_sort_files(csv_files)
-        
-        for file in csv_files:
-            metadata = self._parse_filename(file.name)
-            print(f"File: {file.name}")
-            print(f"  Patient: {metadata.patient_name}")
-            print(f"  Movement: {metadata.movement_type}")
-            print(f"  Jacket: {metadata.jacket_status}")
-            print(f"  Side: {metadata.side}")
-            print(f"  Model: {metadata.model_name}")
-            print()
-    
-    def get_processing_report(self) -> pd.DataFrame:
-        """Get detailed processing report"""
-        with sqlite3.connect(self.db_path) as conn:
-            return pd.read_sql_query("""
-                SELECT 
-                    file_order,
-                    filename,
-                    status,
-                    rows_processed,
-                    error_message,
-                    processed_at
-                FROM processing_log
-                ORDER BY file_order
-            """, conn)
-    
-    def get_database_stats(self) -> Dict:
-        """Get statistics about the database"""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.cursor()
-            
-            stats = {}
-            
-            cursor.execute("SELECT COUNT(*) FROM landmarks")
-            stats['total_rows'] = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(DISTINCT patient_name) FROM landmarks WHERE patient_name IS NOT NULL")
-            stats['unique_patients'] = cursor.fetchone()[0]
-            
-            cursor.execute("SELECT COUNT(DISTINCT source_file) FROM landmarks")
-            stats['unique_files'] = cursor.fetchone()[0]
-            
-            cursor.execute("""
-                SELECT movement_type, COUNT(*) as count
-                FROM landmarks
-                GROUP BY movement_type
-            """)
-            stats['by_movement'] = dict(cursor.fetchall())
-            
-            cursor.execute("""
-                SELECT jacket_status, COUNT(*) as count
-                FROM landmarks
-                GROUP BY jacket_status
-            """)
-            stats['by_jacket'] = dict(cursor.fetchall())
-            
-            stats['database_size_mb'] = round(self.db_path.stat().st_size / (1024 * 1024), 2)
-            
-        return stats
-    
-    def verify_insertion_order(self) -> pd.DataFrame:
-        """Verify data insertion order"""
-        with sqlite3.connect(self.db_path) as conn:
-            return pd.read_sql_query("""
-                SELECT 
-                    file_order,
-                    source_file,
-                    MIN(id) as first_row_id,
-                    MAX(id) as last_row_id,
-                    COUNT(*) as row_count
-                FROM landmarks
-                GROUP BY file_order, source_file
-                ORDER BY file_order
-            """, conn)
-    
-    def verify_data_integrity(self):
-        """Detailed verification of data insertion order and content"""
-        print("\n" + "=" * 80)
-        print("DATA INTEGRITY VERIFICATION")
-        print("=" * 80)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            # Check each file's data
-            for i in range(8):  # Check first 8 files
-                query = f"""
-                    SELECT 
-                        file_order,
-                        source_file,
-                        patient_name,
-                        movement_type,
-                        jacket_status,
-                        side,
-                        COUNT(*) as rows,
-                        MIN(frame) as min_frame,
-                        MAX(frame) as max_frame,
-                        MIN(id) as first_id,
-                        MAX(id) as last_id
-                    FROM landmarks
-                    WHERE file_order = {i}
-                    GROUP BY file_order, source_file, patient_name, movement_type, jacket_status, side
-                """
-                df = pd.read_sql_query(query, conn)
-                if not df.empty:
-                    print(f"\nFile Order {i}:")
-                    print(f"  Source: {df['source_file'].iloc[0]}")
-                    print(f"  Jacket: {df['jacket_status'].iloc[0]}, Side: {df['side'].iloc[0]}")
-                    print(f"  Rows: {df['rows'].iloc[0]}, IDs: {df['first_id'].iloc[0]}-{df['last_id'].iloc[0]}")
-                    print(f"  Frames: {df['min_frame'].iloc[0]}-{df['max_frame'].iloc[0]}")
-                else:
-                    break
-        
-        print("\n" + "=" * 80)
-    
-    def query_data(self, limit: int = 10, order_by: str = "file_order, id"):
-        """Query data from the database with proper ordering"""
-        with sqlite3.connect(self.db_path) as conn:
-            return pd.read_sql_query(f"""
-                SELECT 
-                    id, patient_name, frame, movement_type, jacket_status, 
-                    side, model_name, timestamp_ms, landmark_id,
-                    x_norm, y_norm, z_norm, visibility, x_px, y_px,
-                    source_file, file_order
-                FROM landmarks
-                ORDER BY {order_by}
-                LIMIT {limit}
-            """, conn)
-    
-    def show_first_rows_by_file(self):
-        """Show the first few rows from each file to verify order"""
-        print("\n" + "=" * 80)
-        print("FIRST ROWS FROM EACH FILE")
-        print("=" * 80)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            # Get the file_order values
-            file_orders = pd.read_sql_query("""
-                SELECT DISTINCT file_order, source_file, jacket_status, side
-                FROM landmarks
-                ORDER BY file_order
-                LIMIT 8
-            """, conn)
-            
-            for _, row in file_orders.iterrows():
-                file_order = row['file_order']
-                source_file = row['source_file']
-                jacket_status = row['jacket_status']
-                side = row['side']
-                
-                print(f"\nFile Order {file_order}: {source_file}")
-                print(f"  Jacket: {jacket_status}, Side: {side}")
-                
-                # Get first 3 rows from this file
-                first_rows = pd.read_sql_query("""
-                    SELECT id, frame, landmark_id, x_norm, y_norm
-                    FROM landmarks
-                    WHERE file_order = ?
-                    ORDER BY id
-                    LIMIT 3
-                """, conn, params=(file_order,))
-                
-                print("  First 3 rows:")
-                for _, r in first_rows.iterrows():
-                    print(f"    ID: {r['id']}, Frame: {r['frame']}, Landmark: {r['landmark_id']}, X: {r['x_norm']}, Y: {r['y_norm']}")
-    
-    def show_processing_order(self):
-        """Show the order in which files were processed"""
-        print("\n" + "=" * 80)
-        print("FILE PROCESSING ORDER")
-        print("=" * 80)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            df = pd.read_sql_query("""
-                SELECT file_order, filename, status, rows_processed
-                FROM processing_log
-                ORDER BY file_order
-            """, conn)
-            
-            for _, row in df.iterrows():
-                print(f"Order {row['file_order']}: {row['filename']} - {row['status']} ({row['rows_processed']} rows)")
+            print(f"Detailed log saved to: {self.log_path}")
+            print("=" * 80)
 
 
-# Usage Example
+def main():
+    """Main execution function"""
+    # Default configuration file path
+    config_file = "config.json"
+    
+    # If a config file is provided as argument, use it
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    
+    # Check if config file exists
+    if not os.path.exists(config_file):
+        print(f"❌ Config file not found: {config_file}")
+        print("Creating a default config.json file...")
+        
+        # Create default config
+        default_config = {
+            "db_path": "landmark_database.db",
+            "log_path": "processing.log",
+            "log_level": "INFO",
+            "semantic_dir": "./semantic_segmentation",
+            "seq_dir": "./seq_files",
+            "summary_file_path": "./merged_summary_enriched_full.xlsx",
+            "chunk_size": 1000,
+            "retry_attempts": 3,
+            "retry_delay": 1.0,
+            "use_parallel": False
+        }
+        
+        with open(config_file, 'w') as f:
+            json.dump(default_config, f, indent=2)
+        
+        print(f"✓ Created {config_file} with default configuration")
+        print("Please edit the configuration and run the script again.")
+        return
+    
+    # Create processor
+    try:
+        processor = EnhancedCSVDatabaseProcessor(config_file)
+        
+        # Process data
+        processor.process_all_sources(
+            semantic_dir=processor.config.semantic_dir,
+            seq_dir=processor.config.seq_dir,
+            summary_file_path=processor.config.summary_file_path
+        )
+    except Exception as e:
+        print(f"\n✗ FATAL ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
 if __name__ == "__main__":
-    processor = CSVDatabaseProcessor(
-        db_path="landmark_database.db",
-        log_path="processing.log"
-    )
-    
-    # Test filename parsing first
-    print("\n" + "=" * 80)
-    print("STEP 1: Testing filename parsing...")
-    print("=" * 80)
-    processor.test_filename_parsing(
-        directory="./semantic_segmentation",
-        sample_size=10
-    )
-    
-    input("\nPress Enter to continue with processing, or Ctrl+C to abort...")
-    
-    # Process files (diagnostics will run automatically after this)
-    processor.process_directory(
-        directory="",
-        pattern="*.csv"
-    )
-    
-    # Additional verification methods
-    print("\n" + "=" * 80)
-    print("ADDITIONAL VERIFICATION")
-    print("=" * 80)
-    
-    # Show processing order
-    processor.show_processing_order()
-    
-    # Verify insertion order
-    order_check = processor.verify_insertion_order()
-    print("\nInsertion Order Check:")
-    print(order_check)
-    
-    # Query first 1000 rows with proper ordering
-    print("\nFirst 1000 rows (correctly ordered):")
-    first_rows = processor.query_data(limit=1000, order_by="file_order, id")
-    print(first_rows[['id', 'file_order', 'jacket_status', 'side', 'frame']].head(20))
-    
-    # Stats
-    stats = processor.get_database_stats()
-    print("\nDatabase Statistics:")
-    for key, value in stats.items():
-        print(f"  {key}: {value}")
+    main()
