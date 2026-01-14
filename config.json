@@ -3147,5 +3147,17 @@
   "skeleton_landmark_radius": 4,
   "video_codec": "mp4v",
   "image_extensions": [".jpg", ".jpeg", ".png", ".bmp"],
-  "video_extensions": [".mp4", ".mov", ".avi", ".mkv"]
+  "video_extensions": [".mp4", ".mov", ".avi", ".mkv"],
+
+  "db_path": "landmark_database.db",
+  "log_path": "processing.log",
+  "log_level": "INFO",
+  "semantic_dir": "./semantic_segmentation",
+  "seq_dir": "./seq_files",
+  "summary_file_path": "./merged_summary_enriched_full.xlsx",
+  "max_workers": 8,
+  "chunk_size": 2000,
+  "retry_attempts": 3,
+  "retry_delay": 1.0
+
 }
