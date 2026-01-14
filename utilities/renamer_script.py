@@ -9,7 +9,8 @@ prefix to the folder number while preserving the rest of the filename structure.
 Features:
 - Skips files that already have the correct PA prefix
 - Fixes duplicates like PA114_PA114 by removing the duplicate
-- Simple pattern: PA{folder_name}_{old_filename}
+- Optional semantic_segmentation prefix
+- Simple pattern: semantic_segmentation_PA{folder_name}_{old_filename} (when enabled)
 - Robust error handling and logging
 """
 
@@ -28,7 +29,8 @@ class FileRenamer:
     """
     
     def __init__(self, root_dir: str, dry_run: bool = False, log_file: str = None, 
-                 verbose: bool = False, file_extensions: Optional[List[str]] = None):
+                 verbose: bool = False, file_extensions: Optional[List[str]] = None,
+                 add_semantic_prefix: bool = False):
         """
         Initialize the FileRenamer.
         
@@ -38,11 +40,13 @@ class FileRenamer:
             log_file: Path to log file (optional)
             verbose: Enable verbose logging
             file_extensions: List of file extensions to process (if None, process all)
+            add_semantic_prefix: If True, add "semantic_segmentation_" prefix to filenames
         """
         self.root_dir = Path(root_dir).resolve()
         self.dry_run = dry_run
         self.verbose = verbose
         self.file_extensions = file_extensions
+        self.add_semantic_prefix = add_semantic_prefix
         
         # Set up logging
         self.setup_logging(log_file)
@@ -133,7 +137,10 @@ class FileRenamer:
         Returns:
             True if the file already has the correct PA prefix, False otherwise
         """
-        expected_prefix = f"PA{folder_name}_"
+        if self.add_semantic_prefix:
+            expected_prefix = f"semantic_segmentation_PA{folder_name}_"
+        else:
+            expected_prefix = f"PA{folder_name}_"
         return filename.startswith(expected_prefix)
     
     def has_duplicate_prefix(self, folder_name: str, filename: str) -> bool:
@@ -189,14 +196,24 @@ class FileRenamer:
             if self.has_correct_prefix(folder_name, fixed_filename):
                 return fixed_filename, 'fix_duplicate'
         
-        # Generate the new filename with the simple pattern
+        # Generate the new filename with the appropriate pattern
         prefixed_folder = f"PA{folder_name}"
-        new_filename = f"{prefixed_folder}_{original_filename}"
+        
+        if self.add_semantic_prefix:
+            new_filename = f"semantic_segmentation_{prefixed_folder}_{original_filename}"
+        else:
+            new_filename = f"{prefixed_folder}_{original_filename}"
+        
         return new_filename, 'rename'
     
     def find_and_prepare_renames(self) -> None:
         """Find all files that need to be renamed and prepare the rename operations."""
         self.logger.info(f"Starting file rename preparation in: {self.root_dir}")
+        if self.add_semantic_prefix:
+            self.logger.info("Using pattern: semantic_segmentation_PA{folder_name}_{original_filename}")
+        else:
+            self.logger.info("Using pattern: PA{folder_name}_{original_filename}")
+        
         self.stats['start_time'] = datetime.now()
         
         if not self.root_dir.exists():
@@ -374,6 +391,11 @@ def main():
         help="File extensions to process (e.g., .csv .mp4). If not specified, all files will be processed."
     )
     parser.add_argument(
+        "--add-semantic-prefix",
+        action="store_true",
+        help="Add 'semantic_segmentation_' prefix to filenames"
+    )
+    parser.add_argument(
         "--log-file",
         help="Path to log file"
     )
@@ -390,7 +412,8 @@ def main():
         dry_run=args.dry_run,
         log_file=args.log_file,
         verbose=args.verbose,
-        file_extensions=args.extensions
+        file_extensions=args.extensions,
+        add_semantic_prefix=args.add_semantic_prefix
     )
     
     try:

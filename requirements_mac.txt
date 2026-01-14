@@ -164,3 +164,4 @@ y-py==0.6.2
 ypy-websocket==0.8.4
 zipp==3.23.0
 pydantic
+openpyxl
