@@ -94,7 +94,7 @@ class EnhancedCSVDatabaseProcessor:
     )
     
     # Simple pattern to extract seq hash from beginning of filename
-    SEQ_PATTERN = re.compile(r'^(cljar[a-z0-9]+)_')
+    SEQ_PATTERN = re.compile(r'^(cl[a-z0-9]+)_')
     
     def __init__(self, config: Union[str, Dict, ConfigModel]):
         """Initialize processor with configuration"""
@@ -1210,7 +1210,7 @@ def main():
             "log_level": "INFO",
             "semantic_dir": "./data/csv/Health_Gait_0_397",
             "seq_dir": "./data/csv/MissionGait",
-            "summary_file_path": "./data/csv/merged_summary_enriched_full.xlsx",
+            "summary_file_path": "./data/csv/merged_summary_enriched_full.csv",
             "chunk_size": 1000,
             "retry_attempts": 3,
             "retry_delay": 1.0,
