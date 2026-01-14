@@ -3154,7 +3154,7 @@
   "log_level": "INFO",
   "semantic_dir": "./data/csv/Health_Gait_0_397", 
   "seq_dir": "./data/csv/MissionGait",
-  "summary_file_path": "./data/merged_summary_enriched_full.xlsx",
+  "summary_file_path": "./data/csv/merged_summary_enriched_full.xlsx",
   "max_workers": 8,
   "chunk_size": 2000,
   "retry_attempts": 3,
