@@ -263,3 +263,32 @@ After (Preserve Structure Mode):
 - Duplicate Detection: Warns about existing files and can optionally overwrite
 - Error Handling: Properly handles permission issues and other errors
 - Detailed Logging: Provides clear information about what's being copied
+
+
+------------------
+
+# Pattern Adder script
+
+```
+1. Basic Usage (CORRECT):
+python pattern_adder.py semantic_segmentation .\data\csv\Health_Gait_0_397\
+
+2. Preview Changes First:
+python pattern_adder.py semantic_segmentation .\data\csv\Health_Gait_0_397\ --dry-run
+
+3. Process Only Specific File Types:
+python pattern_adder.py semantic_segmentation .\data\csv\Health_Gait_0_397\ --extensions .csv .mp4
+
+4. Process Subdirectories Recursively:
+python pattern_adder.py semantic_segmentation .\data\csv\Health_Gait_0_397\ --recursive
+
+5. Verbose Output:
+python pattern_adder.py semantic_segmentation .\data\csv\Health_Gait_0_397\ --verbose
+```
+
+
+Key Changes Made:
+- Removed the word "pattern" from the command - The script now expects the pattern directly
+- Added better error handling - Checks if the input directory exists before processing
+- Improved help text - Added examples to make usage clearer
+- Better argument validation - More robust checking of input parameters
