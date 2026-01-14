@@ -1210,7 +1210,7 @@ def main():
             "log_level": "INFO",
             "semantic_dir": "./data/csv/Health_Gait_0_397",
             "seq_dir": "./data/csv/MissionGait",
-            "summary_file_path": "./data/csv/merged_summary_enriched_full.csv",
+            "summary_file_path": "./data/csv/merged_summary_enriched_full_final.xlsx",
             "chunk_size": 1000,
             "retry_attempts": 3,
             "retry_delay": 1.0,
