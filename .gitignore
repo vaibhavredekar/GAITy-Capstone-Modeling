@@ -136,3 +136,9 @@ mlruns
 
 #config file has sensitive data
 .mlflow_uri
+
+
+#Database file
+data/filled_gait_data_encoded.parquet
+*.parquet
+data/GAVD_data/

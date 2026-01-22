@@ -136,3 +136,61 @@ git add <notebook>.ipynb
 git commit -m "Resolve notebook merge conflict"
 ```
 That’s it — clean merges for notebooks!
+
+
+
+
+
+### class definition for prediction targets
+
+Gait_marker predictions are based on Mission Gait Deviation library for the respective case studies: https://missiongait.org/gait-deviations-library/
+
+The classification was done by the project team based on the anatomic location of the abnormal movement pattern and movement science principles.
+
+Class definitions used (explicit)
+Distal / Foot control deficit
+Foot Drop
+Foot Slap
+Inadequate Dorsiflexion
+Foot Flat Initial Contact
+Excess Pronation
+Excess Supination
+Reduced Metatarsophalangeal Joint Extension
+Absent Heel Rise During Terminal Stance
+Early Heel Rise
+Steppage Gait
+
+Knee sagittal-plane abnormality
+Knee Extensor Thrust
+Knee Hyperextension
+Reduced Knee Extension
+Reduced Knee Flexion
+Knee Valgus
+
+Hip / Pelvic control deficit
+Trendelenburg
+Hip Hiking
+Posterior Pelvic Tilt
+Anterior Pelvic Tilt
+Reduced Pelvic Rotation
+Reduced Hip Extension
+Reduced Hip Internal Rotation
+Circumduction
+Medial Whip
+
+Trunk & balance abnormality
+Reduced Arm Swing
+Forward Lean
+Left Lean
+Right Lean
+Reduced Trunk Rotation
+
+Imbalance
+Cautious Gait
+Spatiotemporal asymmetry
+Wide Base of Support
+Step Length Asymmetry
+Reduced Step Length
+Reduced Left Weightshift
+
+
