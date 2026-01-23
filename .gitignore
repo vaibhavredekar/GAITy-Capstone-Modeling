@@ -109,6 +109,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.mediapipe_env/
 
 # Spyder project settings
 .spyderproject
@@ -145,5 +146,4 @@ data/GAVD_data/
 
 
 # .DS_Store
-.DS_Store
 .DS_Store
