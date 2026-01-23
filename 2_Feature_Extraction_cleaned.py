@@ -1,47 +1,57 @@
 """
-Feature extraction for gait clips based on gait_preprocessing_pipeline.py.
-
-Assumptions:
-- MediaPipe Pose with 33 joints
-- Coordinates can be normalized with normalize_pose_3d
-- Gait clips are time series of shape (T, 33, 3)
+Important
+---------
+`Pose_Preprocessing_Pipeline_2.py` should be run first to produce windowed
+arrays (N, T, 33, 3). Those windows are then passed to
+`extract_features_from_windows`.
 """
 
 import numpy as np
 import pandas as pd
 
+from dataclasses import dataclass
+from typing import Any, Iterable
+
 from scipy.ndimage import gaussian_filter1d  # smoothing speeds
 from scipy.signal import find_peaks          # step event detection
 
-import gait_preprocessing_pipeline as gait
-from gait_preprocessing_pipeline import (
-    add_pose_column,
-    normalize_pose_3d,
-    N_JOINTS,
-    LEFT_HIP, RIGHT_HIP,
-    LEFT_SHOULDER, RIGHT_SHOULDER,
-    LEFT_HEEL, RIGHT_HEEL,
-)
+# ---------------------------------------------------------------------
+# MediaPipe Pose constants
+# ---------------------------------------------------------------------
+N_JOINTS = 33
 
-# ---------------------------------------------------------------------
-# Joint indices (MediaPipe Pose)
-# ---------------------------------------------------------------------
+LEFT_SHOULDER, RIGHT_SHOULDER = 11, 12
+LEFT_HIP, RIGHT_HIP = 23, 24
 
 LEFT_KNEE, RIGHT_KNEE = 25, 26
 LEFT_ANKLE, RIGHT_ANKLE = 27, 28
+LEFT_HEEL, RIGHT_HEEL = 29, 30
 LEFT_FOOT_INDEX, RIGHT_FOOT_INDEX = 31, 32
 
 # ---------------------------------------------------------------------
-# High-level 5-class label scheme (Pierre's categories)
+# Config
 # ---------------------------------------------------------------------
+@dataclass(frozen=True)
+class FeatureConfig:
+    """Configuration for feature extraction.
+
+    Defaults are chosen to match the previous behavior.
+    """
+
+    # Smoothing (applied in joint_speed)
+    smooth_sigma: float = 1.0
+
+    # Moving vs still threshold (used in moving_and_still_times)
+    speed_thresh: float = 0.02
+
+    # Step detection constraint
+    min_step_time: float = 0.3
+
+    # Normalize if pose doesn't look normalized
+    auto_normalize_if_needed: bool = True
+
 # ---------------------------------------------------------------------
-# ALSO IN PIERRES CODE !!!
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-# ALSO IN PIERRES CODE !!!
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-# ALSO IN PIERRES CODE !!!
+# High-level 5-class label scheme 
 # ---------------------------------------------------------------------
 CLASS_MAP = {
     "gait_anomaly_distal_foot_control_deficit": {
@@ -103,9 +113,33 @@ CLASS_NAME_TO_ID: dict[str, int] = {
 }
 
 # ---------------------------------------------------------------------
-# Low-level helpers: speed, ROM, asymmetry, angles, temporal features
+# Normalization (copied from Pose_Preprocessing_Pipeline_2.py to keep behavior consistent)
 # ---------------------------------------------------------------------
 
+def normalize_pose_3d(pose: np.ndarray) -> np.ndarray:
+    """Normalize pose sequence by pelvis centering and torso-length scaling.
+
+    pose: (T, 33, 3)
+
+    Returns
+    -------
+    (T, 33, 3) normalized pose
+    """
+    pose = np.asarray(pose, dtype=float)
+
+    pelvis = (pose[:, LEFT_HIP] + pose[:, RIGHT_HIP]) / 2.0               # (T, 3)
+    pose_centered = pose - pelvis[:, None, :]                             # (T, 33, 3)
+    torso = (pose_centered[:, LEFT_SHOULDER] + pose_centered[:, RIGHT_SHOULDER]) / 2.0
+
+    scale = np.linalg.norm(torso, axis=1).mean()
+    if scale == 0 or not np.isfinite(scale):
+        raise ValueError("Invalid torso scale during pose normalisation")
+
+    return pose_centered / scale
+
+# ---------------------------------------------------------------------
+# Low-level helpers: speed, ROM, asymmetry, angles, temporal features
+# ---------------------------------------------------------------------
 
 def joint_speed(
     pose_norm: np.ndarray,
@@ -115,13 +149,6 @@ def joint_speed(
 ) -> np.ndarray:
     """
     Frame-to-frame 3D speed of one joint in a normalized clip.
-
-    pose_norm : (T, 33, 3) normalized pose
-    joint_idx : joint index (e.g. LEFT_KNEE)
-    fps       : frames per second
-    smooth_sigma : Gaussian smoothing in frames (0 = no smoothing)
-
-    Returns
     -------
     speed : (T-1,) array in 'normalized units per second'
     """
@@ -129,11 +156,9 @@ def joint_speed(
 
     if smooth_sigma and smooth_sigma > 0:
         joint_traj = gaussian_filter1d(joint_traj, sigma=smooth_sigma, axis=0)
-
-    diffs = np.diff(joint_traj, axis=0)      # (T-1, 3)
-    disp = np.linalg.norm(diffs, axis=1)     # (T-1,)
-    speed = disp * fps
-    return speed
+    diffs = np.diff(joint_traj, axis=0)
+    disp = np.linalg.norm(diffs, axis=1)
+    return disp * fps
 
 
 def moving_and_still_times(
@@ -145,11 +170,6 @@ def moving_and_still_times(
 ) -> dict:
     """
     How long a joint is moving vs not moving.
-
-    Moving    = speed >= speed_thresh
-    Not moving = speed < speed_thresh
-
-    Returns
     -------
     dict with times in seconds and fractions of the clip.
     """
@@ -180,12 +200,6 @@ def range_of_motion(
 ) -> dict:
     """
     Range of motion (ROM) of a joint.
-
-    axis:
-        None  -> 3D ROM (max distance from mean)
-        'x'   -> max(x) - min(x)
-        'y'   -> max(y) - min(y)
-        'z'   -> max(z) - min(z)
     """
     traj = pose_norm[:, joint_idx, :]  # (T, 3)
 
@@ -204,8 +218,7 @@ def range_of_motion(
 
 def asymmetry(L: float, R: float, eps: float = 1e-6) -> float:
     """
-    Generic left-right asymmetry index:
-        (L - R) / (L + R + eps)
+    Generic left-right asymmetry index: (L - R) / (L + R + eps)
     """
     return float((L - R) / (L + R + eps))
 
@@ -217,11 +230,6 @@ def joint_angle(
 ) -> np.ndarray:
     """
     Joint angle in degrees over time.
-
-    p_prox  : (T, 3) proximal point (e.g. hip for knee angle)
-    p_joint : (T, 3) joint point (e.g. knee)
-    p_dist  : (T, 3) distal point (e.g. ankle)
-
     Angle is between segments (p_prox - p_joint) and (p_dist - p_joint).
     """
     v1 = p_prox - p_joint        # (T, 3)
@@ -242,15 +250,12 @@ def detect_step_events_from_ankle(
     min_step_time: float = 0.3,
 ) -> np.ndarray:
     """
-    Coarse step detection from an ankle vertical trajectory.
-
     - Use local minima (peaks on -ankle_y) as heel strike proxies
     - min_step_time limits unrealistically fast steps
     """
     ankle_y = np.asarray(ankle_y, dtype=float)
     if ankle_y.size < 3 or fps <= 0:
         return np.array([], dtype=int)
-
     inv = -ankle_y
     min_distance = max(1, int(min_step_time * fps))
     peaks, _ = find_peaks(inv, distance=min_distance)
@@ -264,16 +269,6 @@ def step_temporal_features(
 ) -> dict:
     """
     Temporal gait features from one ankle trajectory.
-
-    Returns
-    -------
-    dict with:
-      - mean_step_time
-      - std_step_time
-      - cadence (steps/min)
-      - mean_stride_time
-      - std_stride_time
-      - step_time_cv (Coeff. of Variation)
     """
     ankle_y = np.asarray(ankle_y, dtype=float)
     peaks = detect_step_events_from_ankle(ankle_y, fps, min_step_time=min_step_time)
@@ -339,38 +334,40 @@ def build_df_video(df_raw: pd.DataFrame) -> pd.DataFrame:
     return add_pose_column(df_raw)
 
 # ---------------------------------------------------------------------
-# Features for a single clip
+# Features for a single window
 # ---------------------------------------------------------------------
 
-
-def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
-    """
-    Compute gait features from a single clip.
+def compute_window_features(window: np.ndarray, fps: float, cfg: FeatureConfig | None = None) -> dict[str, float]:
+    """Compute gait features from a single window.
 
     Parameters
     ----------
-    clip : np.ndarray
-        Raw or already-normalized pose for one clip, shape (T, 33, 3).
+    window : np.ndarray
+        Pose window, shape (T, 33, 3). Can be raw or already-normalized.
     fps : float
-        Frames per second of this clip.
+        Effective FPS for this window time axis (after any resampling).
+    cfg : FeatureConfig | None
+        Feature extraction parameters (defaults preserve old behavior).
 
     Returns
     -------
     dict
-        Scalar feature dictionary for this clip.
+        Scalar feature dictionary for this window.
     """
-    clip = np.asarray(clip)
-    if clip.ndim != 3 or clip.shape[1] != N_JOINTS:
-        raise ValueError(f"clip must be of shape (T, {N_JOINTS}, 3), got {clip.shape}")
 
-    # Normalize if needed (pelvis should be near 0)
-    pelvis = (clip[:, LEFT_HIP] + clip[:, RIGHT_HIP]) / 2
-    pelvis_mean_norm = np.linalg.norm(pelvis.mean(axis=0))
+    cfg = cfg or FeatureConfig()
 
-    if pelvis_mean_norm > 1e-2:
-        pose_norm = normalize_pose_3d(clip)
+    window = np.asarray(window)
+    if window.ndim != 3 or window.shape[1] != N_JOINTS or window.shape[2] != 3:
+        raise ValueError(f"window must be of shape (T, {N_JOINTS}, 3), got {window.shape}")
+
+    # Auto-normalize if the pelvis isn't near 0 (same heuristic as before)
+    if cfg.auto_normalize_if_needed:
+        pelvis = (window[:, LEFT_HIP] + window[:, RIGHT_HIP]) / 2
+        pelvis_mean_norm = np.linalg.norm(pelvis.mean(axis=0))
+        pose_norm = normalize_pose_3d(window) if pelvis_mean_norm > 1e-2 else window
     else:
-        pose_norm = clip
+        pose_norm = window
 
     feats: dict[str, float] = {}
 
@@ -421,10 +418,8 @@ def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
 
     feats["step_height_symmetry"] = float((hL - hR) / (hL + hR + eps))
     feats["step_length_symmetry"] = float((lL - lR) / (lL + lR + eps))
-
     # ------------------------------------------------------------------
-    # Knee motion: moving vs still, ROM (your original idea)
-    # ------------------------------------------------------------------
+    # Knee motion: moving vs still, ROM 
     left_knee_move = moving_and_still_times(pose_norm, LEFT_KNEE, fps)
     right_knee_move = moving_and_still_times(pose_norm, RIGHT_KNEE, fps)
 
@@ -438,7 +433,7 @@ def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
 
     # ------------------------------------------------------------------
     # Joint ROM (hip / shoulder / ankle) + asymmetries + stance/swing
-    # ------------------------------------------------------------------
+    
     # Hip ROM (vertical axis)
     hip_L_rom_y = range_of_motion(pose_norm, LEFT_HIP, axis="y")["rom_y"]
     hip_R_rom_y = range_of_motion(pose_norm, RIGHT_HIP, axis="y")["rom_y"]
@@ -481,7 +476,7 @@ def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
 
     # ------------------------------------------------------------------
     # Joint angles (hip / knee / ankle) + angle-based ROM/asym
-    # ------------------------------------------------------------------
+    
     # Knee angles (hip–knee–ankle)
     knee_angle_L = joint_angle(
         pose_norm[:, LEFT_HIP, :],
@@ -555,7 +550,7 @@ def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
 
     # ------------------------------------------------------------------
     # Temporal gait features & step width proxy
-    # ------------------------------------------------------------------
+    
     left_temporal = step_temporal_features(left_ankle_y, fps)
     right_temporal = step_temporal_features(right_ankle_y, fps)
 
@@ -589,48 +584,68 @@ def compute_clip_features(clip: np.ndarray, fps: float) -> dict:
 
     return feats
 
+#---------------------------------------------------------------------
+# Batch extraction: windows -> DataFrame (schema identical to old output)
 # ---------------------------------------------------------------------
-# Extract features from df_video -ALSO IN PIERRES CODE !!!
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-# Extract features from df_video -ALSO IN PIERRES CODE !!!
-# ---------------------------------------------------------------------
-# ---------------------------------------------------------------------
-# Extract features from df_video -ALSO IN PIERRES CODE !!!
-# ---------------------------------------------------------------------
-def extract_features_from_df_video(
-    df_video: pd.DataFrame,
-    cycles: int = 1,
-    resample_frames: int = 60,
+
+
+def extract_features_from_windows(
+    X_windows: np.ndarray,
+    fps: float,
+    gait_pattern: Iterable[str] | None = None,
+    movement_type: Iterable[str] | None = None,
+    side: Iterable[str] | None = None,
+    source_file: Iterable[str] | None = None,
+    cfg: FeatureConfig | None = None,
 ) -> pd.DataFrame:
+    """Extract features for each window.
+
+    Parameters
+    ----------
+    X_windows : np.ndarray
+        Window tensor, shape (N, T, 33, 3)
+    fps : float
+        Effective FPS for the window time axis (after resampling).
+    gait_pattern, movement_type, side, source_file : optional iterables
+        Per-window metadata. If not provided, values are None.
+    cfg : FeatureConfig | None
+        Feature extraction configuration.
+
+    Returns
+    -------
+    pd.DataFrame
+        Same columns as the old extract_features_from_df_video output.
     """
-    Simplified pipeline:
 
-        df_video (with pose, fps, gait_pattern, ...) →
-        one feature row per video/clip →
-        tabular DataFrame with 5-class labels.
-    """
-    feature_rows = []
+    cfg = cfg or FeatureConfig()
 
-    for _, row in df_video.iterrows():
-        pose = row["pose"]  # (T, 33, 3)
+    X_windows = np.asarray(X_windows)
+    if X_windows.ndim != 4 or X_windows.shape[2] != N_JOINTS or X_windows.shape[3] != 3:
+        raise ValueError(
+            f"X_windows must have shape (N, T, {N_JOINTS}, 3), got {X_windows.shape}"
+        )
 
-        # fps: use per-row fps if available, otherwise estimate or fallback
-        fps_val = row.get("fps", np.nan)
-        if isinstance(fps_val, (int, float, np.floating)) and not np.isnan(fps_val):
-            fps = float(fps_val)
-        else:
-            duration = row.get("duration", np.nan)
-            if isinstance(duration, (int, float, np.floating)) and duration > 0:
-                fps = pose.shape[0] / float(duration)
-            else:
-                fps = 30.0  # fallback
+    N = X_windows.shape[0]
 
-        # 1) clip-level features
-        feats = compute_clip_features(pose, fps)
+    def _to_list(x: Iterable[Any] | None) -> list[Any]:
+        if x is None:
+            return [None] * N
+        x_list = list(x)
+        if len(x_list) != N:
+            raise ValueError(f"Expected metadata length {N}, got {len(x_list)}")
+        return x_list
 
-        # 2) label mapping: fine label -> 5-class -> id
-        fine_label = row.get("gait_pattern", None)
+    gait_pattern_l = _to_list(gait_pattern)
+    movement_type_l = _to_list(movement_type)
+    side_l = _to_list(side)
+    source_file_l = _to_list(source_file)
+
+    rows: list[dict[str, Any]] = []
+
+    for i in range(N):
+        feats = compute_window_features(X_windows[i], fps=fps, cfg=cfg)
+
+        fine_label = gait_pattern_l[i]
         class_name = PATTERN_TO_CLASS.get(fine_label, None)
         class_id = CLASS_NAME_TO_ID.get(class_name, None)
 
@@ -638,12 +653,10 @@ def extract_features_from_df_video(
         feats["label_class"] = class_name
         feats["label_id"] = class_id
 
-        # 3) optional metadata
-        feats["movement_type"] = row.get("movement_type", None)
-        feats["side"] = row.get("side", None)
-        feats["source_file"] = row.get("source_file", None)
+        feats["movement_type"] = movement_type_l[i]
+        feats["side"] = side_l[i]
+        feats["source_file"] = source_file_l[i]
 
-        feature_rows.append(feats)
+        rows.append(feats)
 
-    df_features = pd.DataFrame(feature_rows)
-    return df_features
+    return pd.DataFrame(rows)
