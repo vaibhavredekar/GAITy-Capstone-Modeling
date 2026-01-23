@@ -1,3 +1,12 @@
+#!/usr/bin/env python3
+"""
+Production-Grade CSV to SQLite Database Processor with Gait Markers Support
+Processes semantic segmentation and seq-based CSV files with column merging from Excel summary
+
+Usage:
+    python script.py config.json
+"""
+
 import sqlite3
 import pandas as pd
 import re
@@ -81,7 +90,7 @@ class ConfigModel(BaseModel):
         return v.upper()
 
 class EnhancedCSVDatabaseProcessor:
-    """Production-grade CSV to SQLite database processor with column merging"""
+    """Production-grade CSV to SQLite database processor with column merging and gait markers support"""
     
     # Filename pattern regex for semantic segmentation files
     SEMANTIC_PATTERN = re.compile(
@@ -204,7 +213,7 @@ class EnhancedCSVDatabaseProcessor:
             raise Exception("Shutdown requested during database connection")
     
     def _create_database_schema(self):
-        """Create database schema with merged columns"""
+        """Create database schema with merged columns including gait_markers"""
         self.logger.info("Creating database schema...")
         
         with self._db_connection() as conn:
@@ -255,6 +264,7 @@ class EnhancedCSVDatabaseProcessor:
                         checksum TEXT,
                         width INTEGER,
                         height INTEGER,
+                        gait_markers TEXT,          -- Gait markers from Excel summary
                         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
                 """)
@@ -291,7 +301,16 @@ class EnhancedCSVDatabaseProcessor:
                 conn.commit()
                 self.logger.info("✓ Database schema created successfully")
             else:
-                self.logger.info("✓ Database already exists, preserving data")
+                # Check if gait_markers column exists, add if not
+                cursor.execute("PRAGMA table_info(landmarks)")
+                columns = [row[1] for row in cursor.fetchall()]
+                
+                if 'gait_markers' not in columns:
+                    cursor.execute("ALTER TABLE landmarks ADD COLUMN gait_markers TEXT")
+                    conn.commit()
+                    self.logger.info("✓ Added gait_markers column to existing database")
+                else:
+                    self.logger.info("✓ Database already exists with gait_markers column")
     
     def _parse_semantic_filename(self, filename: str) -> FileMetadata:
         """Extract metadata from semantic segmentation filename"""
@@ -392,7 +411,7 @@ class EnhancedCSVDatabaseProcessor:
             return str(value)
     
     def _load_merged_summary_data(self, summary_file_path: str) -> Tuple[pd.DataFrame, Dict]:
-        """Load and process the merged summary data"""
+        """Load and process the merged summary data including gait_markers"""
         self.logger.info(f"Loading merged summary from: {summary_file_path}")
         
         try:
@@ -411,6 +430,13 @@ class EnhancedCSVDatabaseProcessor:
                 self.logger.error("  ✗ CRITICAL: 'seq' column not found!")
                 self.logger.error(f"     Available columns: {list(summary_df.columns)}")
                 raise ValueError("Missing 'seq' column in merged_summary file")
+            
+            # Check for gait_markers column
+            if 'gait_markers' not in summary_df.columns:
+                self.logger.warning("  ⚠️  'gait_markers' column not found in summary file")
+                self.logger.warning("     Gait markers will not be added to the database")
+            else:
+                self.logger.info("  ✓ 'gait_markers' column found in summary file")
             
             # Clean seq values - remove whitespace and convert to string
             summary_df['seq'] = summary_df['seq'].astype(str).str.strip()
@@ -506,9 +532,9 @@ class EnhancedCSVDatabaseProcessor:
             # Initialize new columns with None
             new_columns = [
                 'start_frame', 'end_frame', 'url', 'gait_event', 'dataset', 
-                'gait_pattern', 'add_pattern_info', 'title', 'uploader',
+                'gait_pattern', 'add_pattern_info' ,'title', 'uploader',
                 'fps', 'start_time', 'end_time', 'duration', 
-                'checksum', 'width', 'height'
+                'checksum', 'width', 'height', 'gait_markers'
             ]
             
             for col in new_columns:
@@ -571,7 +597,7 @@ class EnhancedCSVDatabaseProcessor:
         return result
     
     def _process_seq_file(self, file_path: Path, file_order: int, summary_lookup: Dict) -> Dict[str, Any]:
-        """Process a single seq-based file"""
+        """Process a single seq-based file with gait_markers support"""
         filename = file_path.name
         full_path = str(file_path.absolute())
         result = {
@@ -648,7 +674,7 @@ class EnhancedCSVDatabaseProcessor:
             df['file_path'] = full_path
             df['file_order'] = file_order
             
-            # Add new columns from summary
+            # Add new columns from summary including gait_markers
             new_columns_mapping = {
                 'start_frame': 'start_frame',
                 'end_frame': 'end_frame',
@@ -665,7 +691,8 @@ class EnhancedCSVDatabaseProcessor:
                 'duration': 'duration',
                 'checksum': 'checksum',
                 'width': 'width',
-                'height': 'height'
+                'height': 'height',
+                'gait_markers': 'gait_markers'  # Gait markers from Excel
             }
             
             for db_col, summary_col in new_columns_mapping.items():
@@ -789,6 +816,7 @@ class EnhancedCSVDatabaseProcessor:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_order ON landmarks(file_order)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_patient_frame ON landmarks(patient_name, frame)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_source_file ON landmarks(source_file)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gait_markers ON landmarks(gait_markers)")
             conn.commit()
         
         # Summary
@@ -893,6 +921,7 @@ class EnhancedCSVDatabaseProcessor:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_gait_event ON landmarks(gait_event)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_dataset ON landmarks(dataset)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_path ON landmarks(file_path)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_gait_markers ON landmarks(gait_markers)")
             conn.commit()
         
         # Summary
@@ -950,6 +979,9 @@ class EnhancedCSVDatabaseProcessor:
         """
         # Create database schema
         if not self.db_path.exists():
+            self._create_database_schema()
+        else:
+            # Ensure gait_markers column exists in existing database
             self._create_database_schema()
         
         total_successful = 0
@@ -1045,13 +1077,46 @@ class EnhancedCSVDatabaseProcessor:
             cursor.execute("SELECT COUNT(DISTINCT patient_name) FROM landmarks WHERE patient_name IS NOT NULL")
             unique_patients = cursor.fetchone()[0]
             
+            cursor.execute("SELECT COUNT(DISTINCT gait_markers) FROM landmarks WHERE gait_markers IS NOT NULL")
+            unique_gait_markers = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM landmarks WHERE gait_markers IS NOT NULL")
+            rows_with_gait_markers = cursor.fetchone()[0]
+            
             print(f"📈 Total rows: {total_rows:,}")
             print(f"📂 Unique files: {unique_files}")
             print(f"👤 Unique patients/seqs: {unique_patients}")
+            print(f"🏷️  Unique gait markers: {unique_gait_markers}")
+            print(f"📊 Rows with gait markers: {rows_with_gait_markers:,}")
             
-            # === SECTION 2: DATA ORDER VERIFICATION ===
+            # === SECTION 2: GAIT MARKERS VERIFICATION ===
             print(f"\n{'=' * 80}")
-            print(f"2. DATA ORDER VERIFICATION")
+            print(f"2. GAIT MARKERS VERIFICATION")
+            print(f"{'=' * 80}")
+            
+            cursor.execute("""
+                SELECT gait_markers, COUNT(*) as count, COUNT(DISTINCT patient_name) as patients
+                FROM landmarks 
+                WHERE gait_markers IS NOT NULL AND gait_markers != ''
+                GROUP BY gait_markers
+                ORDER BY count DESC
+                LIMIT 10
+            """)
+            
+            gait_stats = cursor.fetchall()
+            if gait_stats:
+                print(f"\nTop 10 Gait Markers:")
+                print(f"{'Gait Marker':<30} {'Patients':<10} {'Records':<10}")
+                print(f"{'-' * 55}")
+                for marker, count, patients in gait_stats:
+                    marker_display = marker[:27] + "..." if len(marker) > 30 else marker
+                    print(f"{marker_display:<30} {patients:<10} {count:<10}")
+            else:
+                print("\n⚠️  No gait markers found in database")
+            
+            # === SECTION 3: DATA ORDER VERIFICATION ===
+            print(f"\n{'=' * 80}")
+            print(f"3. DATA ORDER VERIFICATION")
             print(f"{'=' * 80}")
             
             # Check if data is ordered by file_order
@@ -1084,9 +1149,9 @@ class EnhancedCSVDatabaseProcessor:
                 print(f"\n✗ WARNING: Data is NOT properly ordered by file_order!")
                 print(f"   This indicates files were processed out of sequence")
             
-            # === SECTION 3: ALL PROCESSED FILES (IN ORDER) ===
+            # === SECTION 4: ALL PROCESSED FILES (IN ORDER) ===
             print(f"\n{'=' * 80}")
-            print(f"3. ALL PROCESSED FILES (IN INSERTION ORDER)")
+            print(f"4. ALL PROCESSED FILES (IN INSERTION ORDER)")
             print(f"{'=' * 80}")
             
             cursor.execute("""
@@ -1116,13 +1181,13 @@ class EnhancedCSVDatabaseProcessor:
                 
                 print(f"{file_order:<6} {status_icon} {status:<6} {source:<10} {rows_str:<10} {display_name:<50} {seq_str:<30}")
             
-            # === SECTION 4: FAILED FILES DETAIL ===
+            # === SECTION 5: FAILED FILES DETAIL ===
             cursor.execute("SELECT COUNT(*) FROM processing_log WHERE status='FAILED'")
             failed_count = cursor.fetchone()[0]
             
             if failed_count > 0:
                 print(f"\n{'=' * 80}")
-                print(f"4. FAILED FILES DETAIL")
+                print(f"5. FAILED FILES DETAIL")
                 print(f"{'=' * 80}")
                 
                 cursor.execute("""
@@ -1141,14 +1206,14 @@ class EnhancedCSVDatabaseProcessor:
                         print(f"    Seq: {seq}")
                     print(f"    Error: {error}")
             
-            # === SECTION 5: SAMPLE DATA VERIFICATION ===
+            # === SECTION 6: SAMPLE DATA VERIFICATION ===
             print(f"\n{'=' * 80}")
-            print(f"5. SAMPLE DATA VERIFICATION")
+            print(f"6. SAMPLE DATA VERIFICATION")
             print(f"{'=' * 80}")
             
             # Show first 10 rows to verify order
             cursor.execute("""
-                SELECT id, file_order, source_file, patient_name, frame
+                SELECT id, file_order, source_file, patient_name, gait_markers, frame
                 FROM landmarks
                 ORDER BY id
                 LIMIT 10
@@ -1157,16 +1222,17 @@ class EnhancedCSVDatabaseProcessor:
             first_rows = cursor.fetchall()
             if first_rows:
                 print(f"\nFirst 10 rows (by ID):")
-                print(f"{'ID':<6} {'Order':<8} {'Source':<30} {'Patient':<15} {'Frame':<8}")
-                print(f"{'-' * 75}")
+                print(f"{'ID':<6} {'Order':<8} {'Source':<25} {'Patient':<15} {'Gait Marker':<15} {'Frame':<8}")
+                print(f"{'-' * 85}")
                 for row in first_rows:
-                    id_val, file_order, source_file, patient_name, frame = row
-                    source_display = source_file[:27] + "..." if len(source_file) > 30 else source_file
-                    print(f"{id_val:<6} {file_order:<8} {source_display:<30} {patient_name:<15} {frame:<8}")
+                    id_val, file_order, source_file, patient_name, gait_marker, frame = row
+                    source_display = source_file[:22] + "..." if len(source_file) > 25 else source_file
+                    gait_display = (str(gait_marker)[:12] + "...") if gait_marker and len(str(gait_marker)) > 15 else (str(gait_marker) if gait_marker else "N/A")
+                    print(f"{id_val:<6} {file_order:<8} {source_display:<25} {patient_name:<15} {gait_display:<15} {frame:<8}")
             
             # Show last 10 rows to verify order
             cursor.execute("""
-                SELECT id, file_order, source_file, patient_name, frame
+                SELECT id, file_order, source_file, patient_name, gait_markers, frame
                 FROM landmarks
                 ORDER BY id DESC
                 LIMIT 10
@@ -1175,12 +1241,13 @@ class EnhancedCSVDatabaseProcessor:
             last_rows = cursor.fetchall()
             if last_rows:
                 print(f"\nLast 10 rows (by ID, reversed):")
-                print(f"{'ID':<6} {'Order':<8} {'Source':<30} {'Patient':<15} {'Frame':<8}")
-                print(f"{'-' * 75}")
+                print(f"{'ID':<6} {'Order':<8} {'Source':<25} {'Patient':<15} {'Gait Marker':<15} {'Frame':<8}")
+                print(f"{'-' * 85}")
                 for row in reversed(last_rows):
-                    id_val, file_order, source_file, patient_name, frame = row
-                    source_display = source_file[:27] + "..." if len(source_file) > 30 else source_file
-                    print(f"{id_val:<6} {file_order:<8} {source_display:<30} {patient_name:<15} {frame:<8}")
+                    id_val, file_order, source_file, patient_name, gait_marker, frame = row
+                    source_display = source_file[:22] + "..." if len(source_file) > 25 else source_file
+                    gait_display = (str(gait_marker)[:12] + "...") if gait_marker and len(str(gait_marker)) > 15 else (str(gait_marker) if gait_marker else "N/A")
+                    print(f"{id_val:<6} {file_order:<8} {source_display:<25} {patient_name:<15} {gait_display:<15} {frame:<8}")
             
             print("\n" + "=" * 80)
             print("✅ DIAGNOSTICS COMPLETE")
@@ -1222,6 +1289,7 @@ def main():
         
         print(f"✓ Created {config_file} with default configuration")
         print("Please edit the configuration and run the script again.")
+        print("Make sure your summary_file_path Excel contains a 'gait_markers' column.")
         return
     
     # Create processor
