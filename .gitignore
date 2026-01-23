@@ -142,3 +142,8 @@ mlruns
 data/filled_gait_data_encoded.parquet
 *.parquet
 data/GAVD_data/
+
+
+# .DS_Store
+.DS_Store
+.DS_Store
