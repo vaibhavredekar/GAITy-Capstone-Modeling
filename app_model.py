@@ -4376,436 +4376,772 @@ def main():
     #         else:
     #             st.info("👆 Upload a pose CSV file to begin analysis.")
 
+    # with tab6:
+    #     st.subheader("🤖 Model Prediction")
+        
+    #     # Initialize debug information in session state if not exists
+    #     if 'debug_info' not in st.session_state:
+    #         st.session_state.debug_info = {}
+        
+    #     # Debug section
+    #     with st.expander("🐛 Debug Information"):
+    #         st.write("Current debug information:")
+    #         st.json(st.session_state.debug_info)
+        
+    #     try:
+    #         # Check if baseline model is available with proper error handling
+    #         st.session_state.debug_info['model_loading'] = "Starting model loading..."
+            
+    #         try:
+    #             baseline_model = ModelManager.load_baseline_model()
+    #             model_loaded = baseline_model is not None
+    #             st.session_state.debug_info['model_loading'] = "Model loading completed"
+    #             st.session_state.debug_info['model_loaded'] = model_loaded
+    #         except Exception as e:
+    #             st.session_state.debug_info['model_loading'] = f"Error: {str(e)}"
+    #             logger.error(f"Error loading baseline model: {e}")
+    #             baseline_model = None
+    #             model_loaded = False
+            
+    #         if not model_loaded:
+    #             st.error("❌ Baseline model not found. Please ensure the model file exists at `models/baseline/xgboost_model.bin`")
+    #             st.info("To train a model, run the training script provided in the documentation.")
+                
+    #             # Provide model troubleshooting information
+    #             with st.expander("🔧 Model Troubleshooting"):
+    #                 st.markdown("""
+    #                 ### Possible Issues:
+    #                 1. Model file doesn't exist at the expected location
+    #                 2. Model file is corrupted
+    #                 3. Incompatible model version
+                    
+    #                 ### Solutions:
+    #                 1. Check if the model file exists: `models/baseline/xgboost_model.bin`
+    #                 2. Re-train the model using the provided training script
+    #                 3. Verify model compatibility with current application version
+    #                 """)
+    #             return
+            
+    #         st.success("✅ Baseline model loaded successfully")
+            
+    #         # Add model information with error handling
+    #         with st.expander("🔍 Model Information"):
+    #             try:
+    #                 if hasattr(baseline_model, 'get_params'):
+    #                     st.json(baseline_model.get_params())
+                    
+    #                 # Add model performance metrics if available
+    #                 model_metrics_path = Path("models/baseline/model_metrics.json")
+    #                 if model_metrics_path.exists():
+    #                     with open(model_metrics_path, 'r') as f:
+    #                         metrics = json.load(f)
+    #                     st.write("**Model Performance Metrics:**")
+    #                     st.json(metrics)
+    #                 else:
+    #                     st.info("Model performance metrics not available")
+    #             except Exception as e:
+    #                 st.error(f"Error retrieving model information: {e}")
+    #                 logger.error(f"Error retrieving model information: {e}")
+            
+    #         # Create three sub-tabs
+    #         subtab1, subtab2, subtab3 = st.tabs(["From Feature Engineering", "From Feature CSV", "From Raw Pose Data"])
+            
+    #         # Sub-tab 1: Use features from Feature Engineering
+    #         with subtab1:
+    #             st.session_state.debug_info['subtab1'] = "Entered subtab1"
+                
+    #             if st.session_state.features_df is None or st.session_state.features_df.empty:
+    #                 st.warning("⚠️ No features available. Please extract features in the Feature Engineering tab first.")
+    #                 if st.button("Go to Feature Engineering Tab"):
+    #                     st.info("Please navigate to the Feature Engineering tab to extract features first.")
+    #             else:
+    #                 st.markdown("---")
+    #                 st.subheader("🔮 Run Model Prediction")
+                    
+    #                 col1, col2 = st.columns([2, 1])
+                    
+    #                 with col1:
+    #                     st.info(f"**Features Available:** {len(st.session_state.features_df)} feature vectors")
+    #                     st.info(f"**Model:** Baseline XGBoost Binary Classifier")
+                    
+    #                 with col2:
+    #                     if st.button("🚀 Run Prediction", use_container_width=True, type="primary"):
+    #                         st.session_state.debug_info['subtab1_prediction'] = "Starting prediction..."
+                            
+    #                         with st.spinner("Preparing features and running prediction..."):
+    #                             try:
+    #                                 # Prepare features for prediction
+    #                                 st.session_state.debug_info['subtab1_prediction'] = "Preparing features..."
+    #                                 X = ModelManager.prepare_features_for_prediction(st.session_state.features_df)
+                                    
+    #                                 # Make predictions
+    #                                 st.session_state.debug_info['subtab1_prediction'] = "Making predictions..."
+    #                                 predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
+                                    
+    #                                 if len(predictions) > 0:
+    #                                     # Create prediction summary
+    #                                     st.session_state.debug_info['subtab1_prediction'] = "Creating summary..."
+    #                                     summary = ModelManager.create_prediction_summary(predictions, probabilities)
+                                        
+    #                                     # Store in session state
+    #                                     st.session_state.model_predictions = predictions
+    #                                     st.session_state.model_summary = summary
+    #                                     st.session_state.model_probabilities = probabilities
+                                        
+    #                                     st.session_state.debug_info['subtab1_prediction'] = "Prediction completed successfully"
+    #                                     st.success("✅ Prediction completed successfully!")
+    #                                 else:
+    #                                     st.error("❌ Prediction failed. No valid predictions generated.")
+    #                                     st.session_state.debug_info['subtab1_prediction'] = "No valid predictions generated"
+    #                             except Exception as e:
+    #                                 st.error(f"❌ Error during prediction: {str(e)}")
+    #                                 logger.error(f"Prediction error: {e}")
+    #                                 st.session_state.debug_info['subtab1_prediction'] = f"Error: {str(e)}"
+                    
+    #                 # Display results if available
+    #                 if st.session_state.model_predictions is not None:
+    #                     st.session_state.debug_info['subtab1_display'] = "Starting display..."
+                        
+    #                     try:
+    #                         display_prediction_results(
+    #                             st.session_state.model_predictions,
+    #                             st.session_state.model_probabilities,
+    #                             st.session_state.model_summary,
+    #                             st.session_state.features_df,
+    #                             baseline_model  # Pass the model to avoid global variable reference
+    #                         )
+    #                         st.session_state.debug_info['subtab1_display'] = "Display completed"
+    #                     except Exception as e:
+    #                         st.error(f"❌ Error displaying results: {str(e)}")
+    #                         logger.error(f"Error displaying results: {e}")
+    #                         st.session_state.debug_info['subtab1_display'] = f"Error: {str(e)}"
+            
+    #         # Sub-tab 2: Use features from uploaded CSV
+    #         with subtab2:
+    #             st.session_state.debug_info['subtab2'] = "Entered subtab2"
+                
+    #             st.markdown("---")
+    #             st.subheader("📁 Upload Feature CSV for Model Prediction")
+                
+    #             # Add instructions
+    #             with st.expander("📖 CSV Format Instructions"):
+    #                 st.markdown("""
+    #                 The uploaded CSV should contain extracted gait features with the following columns:
+    #                 - step_height_symmetry
+    #                 - step_length_symmetry
+    #                 - cadence_asym
+    #                 - knee_rom_asym
+    #                 - hip_rom_asym
+    #                 - [Other gait features...]
+                    
+    #                 **Note**: If you have raw pose data (landmarks), please use the "From Raw Pose Data" tab.
+    #                 """)
+                
+    #             # Add template download
+    #             template_path = Path("templates/feature_template.csv")
+    #             if template_path.exists():
+    #                 with open(template_path, "rb") as f:
+    #                     st.download_button(
+    #                         "📥 Download Feature Template",
+    #                         data=f.read(),
+    #                         file_name="feature_template.csv",
+    #                         mime="text/csv"
+    #                     )
+    #             else:
+    #                 st.warning("Feature template not available")
+                
+    #             col1, col2 = st.columns([2, 1])
+                
+    #             with col1:
+    #                 uploaded_csv = st.file_uploader(
+    #                     "Upload a CSV file with extracted features",
+    #                     type=['csv'],
+    #                     help="Upload a CSV file containing the extracted features for prediction",
+    #                     key="model_csv_upload"
+    #                 )
+                    
+    #                 if uploaded_csv:
+    #                     st.session_state.debug_info['subtab2_upload'] = "File uploaded"
+    #                     st.info(f"📄 {uploaded_csv.name}")
+    #                     st.info(f"📏 {uploaded_csv.size / (1024*1024):.2f} MB")
+                        
+    #                     # Save uploaded CSV
+    #                     csv_path = FEATURES_DIR / f"model_{uploaded_csv.name}"
+    #                     with open(csv_path, 'wb') as f:
+    #                         f.write(uploaded_csv.getvalue())
+                        
+    #                     st.session_state.model_csv_path = csv_path
+                        
+    #                     # Preview CSV
+    #                     with st.expander("👁️ Preview CSV Data"):
+    #                         try:
+    #                             df = pd.read_csv(csv_path)
+    #                             st.dataframe(df.head(10), use_container_width=True)
+    #                             st.caption(f"Showing first 10 rows of {len(df)} total rows")
+    #                         except Exception as e:
+    #                             st.error(f"Could not preview CSV: {e}")
+    #                             st.session_state.debug_info['subtab2_preview'] = f"Error: {str(e)}"
+                
+    #             with col2:
+    #                 if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
+    #                     st.metric("Status", "CSV uploaded")
+    #                     st.metric("File", st.session_state.model_csv_path.name)
+                
+    #             # Run prediction on uploaded CSV
+    #             if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
+    #                 st.markdown("---")
+    #                 st.subheader("🔮 Run Model Prediction")
+                    
+    #                 col1, col2 = st.columns([2, 1])
+                    
+    #                 with col1:
+    #                     st.info(f"**CSV File:** {st.session_state.model_csv_path.name}")
+    #                     st.caption(f"📏 Size: {st.session_state.model_csv_path.stat().st_size / 1024:.1f} KB")
+                    
+    #                 with col2:
+    #                     if st.button("🚀 Run Prediction", use_container_width=True, type="primary", key="predict_model_csv"):
+    #                         st.session_state.debug_info['subtab2_prediction'] = "Starting prediction..."
+                            
+    #                         with st.spinner("Preparing features and running prediction..."):
+    #                             try:
+    #                                 # Load features from CSV
+    #                                 st.session_state.debug_info['subtab2_prediction'] = "Loading CSV..."
+    #                                 df_features = pd.read_csv(st.session_state.model_csv_path)
+                                    
+    #                                 # Prepare features for prediction
+    #                                 st.session_state.debug_info['subtab2_prediction'] = "Preparing features..."
+    #                                 X = ModelManager.prepare_features_for_prediction(df_features)
+                                    
+    #                                 # Make predictions
+    #                                 st.session_state.debug_info['subtab2_prediction'] = "Making predictions..."
+    #                                 predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
+                                    
+    #                                 if len(predictions) > 0:
+    #                                     # Create prediction summary
+    #                                     st.session_state.debug_info['subtab2_prediction'] = "Creating summary..."
+    #                                     summary = ModelManager.create_prediction_summary(predictions, probabilities)
+                                        
+    #                                     # Store in session state
+    #                                     st.session_state.model_csv_predictions = predictions
+    #                                     st.session_state.model_csv_summary = summary
+    #                                     st.session_state.model_csv_probabilities = probabilities
+                                        
+    #                                     st.session_state.debug_info['subtab2_prediction'] = "Prediction completed successfully"
+    #                                     st.success("✅ Prediction completed successfully!")
+    #                                 else:
+    #                                     st.error("❌ Prediction failed. No valid predictions generated.")
+    #                                     st.session_state.debug_info['subtab2_prediction'] = "No valid predictions generated"
+    #                             except Exception as e:
+    #                                 st.error(f"❌ Error during prediction: {str(e)}")
+    #                                 logger.error(f"Prediction error: {e}")
+    #                                 st.session_state.debug_info['subtab2_prediction'] = f"Error: {str(e)}"
+                    
+    #                 # Display results if available
+    #                 if 'model_csv_predictions' in st.session_state and st.session_state.model_csv_predictions is not None:
+    #                     st.session_state.debug_info['subtab2_display'] = "Starting display..."
+                        
+    #                     try:
+    #                         df_features = pd.read_csv(st.session_state.model_csv_path)
+    #                         display_prediction_results(
+    #                             st.session_state.model_csv_predictions,
+    #                             st.session_state.model_csv_probabilities,
+    #                             st.session_state.model_csv_summary,
+    #                             df_features,
+    #                             baseline_model  # Pass the model to avoid global variable reference
+    #                         )
+    #                         st.session_state.debug_info['subtab2_display'] = "Display completed"
+    #                     except Exception as e:
+    #                         st.error(f"❌ Error displaying results: {str(e)}")
+    #                         logger.error(f"Error displaying results: {e}")
+    #                         st.session_state.debug_info['subtab2_display'] = f"Error: {str(e)}"
+    #             else:
+    #                 st.info("👆 Upload a feature CSV file to begin analysis.")
+            
+    #         # Sub-tab 3: Process raw pose data
+    #         with subtab3:
+    #             st.session_state.debug_info['subtab3'] = "Entered subtab3"
+                
+    #             st.markdown("---")
+    #             st.subheader("📁 Upload Raw Pose Data for Analysis")
+                
+    #             # Add instructions
+    #             with st.expander("📖 Raw Pose Data Format"):
+    #                 st.markdown("""
+    #                 The uploaded CSV should contain MediaPipe pose landmarks with the following columns:
+    #                 - frame: Frame number
+    #                 - landmark_id: Landmark index (0-32)
+    #                 - x_norm: Normalized X coordinate
+    #                 - y_norm: Normalized Y coordinate
+    #                 - z_norm: Normalized Z coordinate
+    #                 - video_id: (Optional) Video identifier
+                    
+    #                 **Note**: This option processes raw pose data and extracts features automatically.
+    #                 """)
+                
+    #             uploaded_pose_csv = st.file_uploader(
+    #                 "Upload a CSV file with MediaPipe pose landmarks",
+    #                 type=['csv'],
+    #                 help="Upload a CSV file containing pose landmarks (x_norm, y_norm, z_norm) for each frame",
+    #                 key="pose_csv_upload"
+    #             )
+                
+    #             if uploaded_pose_csv:
+    #                 st.session_state.debug_info['subtab3_upload'] = "File uploaded"
+                    
+    #                 # Check file size to prevent memory issues
+    #                 if uploaded_pose_csv.size > 50 * 1024 * 1024:  # 50MB limit
+    #                     st.error("File too large. Please upload a smaller file or split it into multiple files.")
+    #                     st.session_state.debug_info['subtab3_upload'] = "File too large"
+    #                     return
+                    
+    #                 # Save uploaded CSV
+    #                 pose_csv_path = FEATURES_DIR / f"pose_{uploaded_pose_csv.name}"
+    #                 with open(pose_csv_path, 'wb') as f:
+    #                     f.write(uploaded_pose_csv.getvalue())
+                    
+    #                 # Preview CSV
+    #                 with st.expander("👁️ Preview Pose Data"):
+    #                     try:
+    #                         df = pd.read_csv(pose_csv_path)
+    #                         st.dataframe(df.head(10), use_container_width=True)
+    #                         st.caption(f"Showing first 10 rows of {len(df)} total rows")
+    #                     except Exception as e:
+    #                         st.error(f"Could not preview CSV: {e}")
+    #                         st.session_state.debug_info['subtab3_preview'] = f"Error: {str(e)}"
+                    
+    #                 # Run analysis
+    #                 if st.button("🚀 Analyze Pose Data", use_container_width=True, type="primary"):
+    #                     st.session_state.debug_info['subtab3_analysis'] = "Starting analysis..."
+                        
+    #                     with st.spinner("Processing pose data and running prediction..."):
+    #                         progress_bar = st.progress(0)
+    #                         status_placeholder = st.empty()
+                            
+    #                         try:
+    #                             # Update progress
+    #                             progress_bar.progress(25)
+    #                             status_placeholder.text("Extracting features from pose data...")
+    #                             st.session_state.debug_info['subtab3_analysis'] = "Extracting features..."
+                                
+    #                             # Check if predict_from_pose_csv method exists
+    #                             if not hasattr(GaitAnalysisEngine, 'predict_from_pose_csv'):
+    #                                 st.error("The method predict_from_pose_csv is not available in GaitAnalysisEngine.")
+    #                                 logger.error("predict_from_pose_csv method not found")
+    #                                 st.session_state.debug_info['subtab3_analysis'] = "Method not found"
+    #                                 return
+                                
+    #                             # Process pose data and make predictions
+    #                             progress_bar.progress(50)
+    #                             status_placeholder.text("Running prediction...")
+    #                             st.session_state.debug_info['subtab3_analysis'] = "Running prediction..."
+                                
+    #                             df_results, probabilities = GaitAnalysisEngine.predict_from_pose_csv(
+    #                                 pose_csv_path, 
+    #                                 model=baseline_model
+    #                             )
+                                
+    #                             # Update progress
+    #                             progress_bar.progress(75)
+    #                             status_placeholder.text("Analyzing results...")
+    #                             st.session_state.debug_info['subtab3_analysis'] = "Analyzing results..."
+                                
+    #                             if df_results is not None and len(df_results) > 0:
+    #                                 # Store in session state
+    #                                 st.session_state.pose_predictions = df_results['prediction'].values
+    #                                 st.session_state.pose_probabilities = probabilities
+                                    
+    #                                 # Create summary
+    #                                 predictions = df_results['prediction'].values
+    #                                 normal_count = np.sum(predictions == 0)
+    #                                 abnormal_count = np.sum(predictions == 1)
+    #                                 summary = {
+    #                                     'total_windows': len(predictions),
+    #                                     'normal_windows': int(normal_count),
+    #                                     'abnormal_windows': int(abnormal_count),
+    #                                     'abnormal_percentage': 100 * abnormal_count / len(predictions)
+    #                                 }
+    #                                 st.session_state.pose_summary = summary
+    #                                 st.session_state.pose_results_df = df_results
+                                    
+    #                                 # Complete progress
+    #                                 progress_bar.progress(100)
+    #                                 status_placeholder.empty()
+                                    
+    #                                 st.session_state.debug_info['subtab3_analysis'] = "Analysis completed successfully"
+    #                                 st.success("✅ Analysis completed successfully!")
+    #                             else:
+    #                                 progress_bar.empty()
+    #                                 status_placeholder.empty()
+    #                                 st.error("❌ Analysis failed. No valid results generated.")
+    #                                 st.session_state.debug_info['subtab3_analysis'] = "No valid results generated"
+    #                         except Exception as e:
+    #                             progress_bar.empty()
+    #                             status_placeholder.empty()
+    #                             st.error(f"❌ Error during analysis: {str(e)}")
+    #                             logger.error(f"Pose analysis error: {e}")
+    #                             st.session_state.debug_info['subtab3_analysis'] = f"Error: {str(e)}"
+                    
+    #                 # Display results if available
+    #                 if 'pose_predictions' in st.session_state and st.session_state.pose_predictions is not None:
+    #                     st.session_state.debug_info['subtab3_display'] = "Starting display..."
+                        
+    #                     try:
+    #                         display_prediction_results(
+    #                             st.session_state.pose_predictions,
+    #                             st.session_state.pose_probabilities,
+    #                             st.session_state.pose_summary,
+    #                             st.session_state.pose_results_df,
+    #                             baseline_model  # Pass the model to avoid global variable reference
+    #                         )
+    #                         st.session_state.debug_info['subtab3_display'] = "Display completed"
+    #                     except Exception as e:
+    #                         st.error(f"❌ Error displaying results: {str(e)}")
+    #                         logger.error(f"Error displaying results: {e}")
+    #                         st.session_state.debug_info['subtab3_display'] = f"Error: {str(e)}"
+    #             else:
+    #                 st.info("👆 Upload a pose CSV file to begin analysis.")
+        
+    #     except Exception as e:
+    #         st.error(f"❌ Unexpected error in Model Prediction tab: {str(e)}")
+    #         logger.error(f"Unexpected error in Model Prediction tab: {e}")
+    #         st.session_state.debug_info['unexpected_error'] = str(e)
+    #         st.code(traceback.format_exc())
+
+
+    # ═══════════════════════════════════════════════════════════════════════════
+# TAB 6: MODEL PREDICTION
+# ═══════════════════════════════════════════════════════════════════════════
+
     with tab6:
         st.subheader("🤖 Model Prediction")
         
-        # Initialize debug information in session state if not exists
-        if 'debug_info' not in st.session_state:
-            st.session_state.debug_info = {}
+        # Check if baseline model is available
+        baseline_model = ModelManager.load_baseline_model()
+        if not baseline_model:
+            st.error("❌ Baseline model not found. Please ensure the model file exists at `models/baseline/xgboost_model.bin`")
+            st.info("To train a model, run the training script provided in the documentation.")
+            
+            # Provide model troubleshooting information
+            with st.expander("🔧 Model Troubleshooting"):
+                st.markdown("""
+                ### Possible Issues:
+                1. Model file doesn't exist at the expected location
+                2. Model file is corrupted
+                3. Incompatible model version
+                
+                ### Solutions:
+                1. Check if the model file exists: `models/baseline/xgboost_model.bin`
+                2. Re-train the model using the provided training script
+                3. Verify model compatibility with current application version
+                """)
+            return
         
-        # Debug section
-        with st.expander("🐛 Debug Information"):
-            st.write("Current debug information:")
-            st.json(st.session_state.debug_info)
+        st.success("✅ Baseline model loaded successfully")
         
-        try:
-            # Check if baseline model is available with proper error handling
-            st.session_state.debug_info['model_loading'] = "Starting model loading..."
+        # Add model information
+        with st.expander("🔍 Model Information"):
+            if hasattr(baseline_model, 'get_params'):
+                st.json(baseline_model.get_params())
             
-            try:
-                baseline_model = ModelManager.load_baseline_model()
-                model_loaded = baseline_model is not None
-                st.session_state.debug_info['model_loading'] = "Model loading completed"
-                st.session_state.debug_info['model_loaded'] = model_loaded
-            except Exception as e:
-                st.session_state.debug_info['model_loading'] = f"Error: {str(e)}"
-                logger.error(f"Error loading baseline model: {e}")
-                baseline_model = None
-                model_loaded = False
-            
-            if not model_loaded:
-                st.error("❌ Baseline model not found. Please ensure the model file exists at `models/baseline/xgboost_model.bin`")
-                st.info("To train a model, run the training script provided in the documentation.")
-                
-                # Provide model troubleshooting information
-                with st.expander("🔧 Model Troubleshooting"):
-                    st.markdown("""
-                    ### Possible Issues:
-                    1. Model file doesn't exist at the expected location
-                    2. Model file is corrupted
-                    3. Incompatible model version
-                    
-                    ### Solutions:
-                    1. Check if the model file exists: `models/baseline/xgboost_model.bin`
-                    2. Re-train the model using the provided training script
-                    3. Verify model compatibility with current application version
-                    """)
-                return
-            
-            st.success("✅ Baseline model loaded successfully")
-            
-            # Add model information with error handling
-            with st.expander("🔍 Model Information"):
-                try:
-                    if hasattr(baseline_model, 'get_params'):
-                        st.json(baseline_model.get_params())
-                    
-                    # Add model performance metrics if available
-                    model_metrics_path = Path("models/baseline/model_metrics.json")
-                    if model_metrics_path.exists():
-                        with open(model_metrics_path, 'r') as f:
-                            metrics = json.load(f)
-                        st.write("**Model Performance Metrics:**")
-                        st.json(metrics)
-                    else:
-                        st.info("Model performance metrics not available")
-                except Exception as e:
-                    st.error(f"Error retrieving model information: {e}")
-                    logger.error(f"Error retrieving model information: {e}")
-            
-            # Create three sub-tabs
-            subtab1, subtab2, subtab3 = st.tabs(["From Feature Engineering", "From Feature CSV", "From Raw Pose Data"])
-            
-            # Sub-tab 1: Use features from Feature Engineering
-            with subtab1:
-                st.session_state.debug_info['subtab1'] = "Entered subtab1"
-                
-                if st.session_state.features_df is None or st.session_state.features_df.empty:
-                    st.warning("⚠️ No features available. Please extract features in the Feature Engineering tab first.")
-                    if st.button("Go to Feature Engineering Tab"):
-                        st.info("Please navigate to the Feature Engineering tab to extract features first.")
-                else:
-                    st.markdown("---")
-                    st.subheader("🔮 Run Model Prediction")
-                    
-                    col1, col2 = st.columns([2, 1])
-                    
-                    with col1:
-                        st.info(f"**Features Available:** {len(st.session_state.features_df)} feature vectors")
-                        st.info(f"**Model:** Baseline XGBoost Binary Classifier")
-                    
-                    with col2:
-                        if st.button("🚀 Run Prediction", use_container_width=True, type="primary"):
-                            st.session_state.debug_info['subtab1_prediction'] = "Starting prediction..."
-                            
-                            with st.spinner("Preparing features and running prediction..."):
-                                try:
-                                    # Prepare features for prediction
-                                    st.session_state.debug_info['subtab1_prediction'] = "Preparing features..."
-                                    X = ModelManager.prepare_features_for_prediction(st.session_state.features_df)
-                                    
-                                    # Make predictions
-                                    st.session_state.debug_info['subtab1_prediction'] = "Making predictions..."
-                                    predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
-                                    
-                                    if len(predictions) > 0:
-                                        # Create prediction summary
-                                        st.session_state.debug_info['subtab1_prediction'] = "Creating summary..."
-                                        summary = ModelManager.create_prediction_summary(predictions, probabilities)
-                                        
-                                        # Store in session state
-                                        st.session_state.model_predictions = predictions
-                                        st.session_state.model_summary = summary
-                                        st.session_state.model_probabilities = probabilities
-                                        
-                                        st.session_state.debug_info['subtab1_prediction'] = "Prediction completed successfully"
-                                        st.success("✅ Prediction completed successfully!")
-                                    else:
-                                        st.error("❌ Prediction failed. No valid predictions generated.")
-                                        st.session_state.debug_info['subtab1_prediction'] = "No valid predictions generated"
-                                except Exception as e:
-                                    st.error(f"❌ Error during prediction: {str(e)}")
-                                    logger.error(f"Prediction error: {e}")
-                                    st.session_state.debug_info['subtab1_prediction'] = f"Error: {str(e)}"
-                    
-                    # Display results if available
-                    if st.session_state.model_predictions is not None:
-                        st.session_state.debug_info['subtab1_display'] = "Starting display..."
-                        
-                        try:
-                            display_prediction_results(
-                                st.session_state.model_predictions,
-                                st.session_state.model_probabilities,
-                                st.session_state.model_summary,
-                                st.session_state.features_df,
-                                baseline_model  # Pass the model to avoid global variable reference
-                            )
-                            st.session_state.debug_info['subtab1_display'] = "Display completed"
-                        except Exception as e:
-                            st.error(f"❌ Error displaying results: {str(e)}")
-                            logger.error(f"Error displaying results: {e}")
-                            st.session_state.debug_info['subtab1_display'] = f"Error: {str(e)}"
-            
-            # Sub-tab 2: Use features from uploaded CSV
-            with subtab2:
-                st.session_state.debug_info['subtab2'] = "Entered subtab2"
-                
+            # Add model performance metrics if available
+            model_metrics_path = Path("models/baseline/model_metrics.json")
+            if model_metrics_path.exists():
+                with open(model_metrics_path, 'r') as f:
+                    metrics = json.load(f)
+                st.write("**Model Performance Metrics:**")
+                st.json(metrics)
+            else:
+                st.info("Model performance metrics not available")
+        
+        # Create three sub-tabs
+        subtab1, subtab2, subtab3 = st.tabs(["From Feature Engineering", "From Feature CSV", "From Raw Pose Data"])
+        
+        # Sub-tab 1: Use features from Feature Engineering
+        with subtab1:
+            if st.session_state.features_df is None or st.session_state.features_df.empty:
+                st.warning("⚠️ No features available. Please extract features in the Feature Engineering tab first.")
+                if st.button("Go to Feature Engineering Tab"):
+                    st.info("Please navigate to the Feature Engineering tab to extract features first.")
+            else:
                 st.markdown("---")
-                st.subheader("📁 Upload Feature CSV for Model Prediction")
-                
-                # Add instructions
-                with st.expander("📖 CSV Format Instructions"):
-                    st.markdown("""
-                    The uploaded CSV should contain extracted gait features with the following columns:
-                    - step_height_symmetry
-                    - step_length_symmetry
-                    - cadence_asym
-                    - knee_rom_asym
-                    - hip_rom_asym
-                    - [Other gait features...]
-                    
-                    **Note**: If you have raw pose data (landmarks), please use the "From Raw Pose Data" tab.
-                    """)
-                
-                # Add template download
-                template_path = Path("templates/feature_template.csv")
-                if template_path.exists():
-                    with open(template_path, "rb") as f:
-                        st.download_button(
-                            "📥 Download Feature Template",
-                            data=f.read(),
-                            file_name="feature_template.csv",
-                            mime="text/csv"
-                        )
-                else:
-                    st.warning("Feature template not available")
+                st.subheader("🔮 Run Model Prediction")
                 
                 col1, col2 = st.columns([2, 1])
                 
                 with col1:
-                    uploaded_csv = st.file_uploader(
-                        "Upload a CSV file with extracted features",
-                        type=['csv'],
-                        help="Upload a CSV file containing the extracted features for prediction",
-                        key="model_csv_upload"
-                    )
-                    
-                    if uploaded_csv:
-                        st.session_state.debug_info['subtab2_upload'] = "File uploaded"
-                        st.info(f"📄 {uploaded_csv.name}")
-                        st.info(f"📏 {uploaded_csv.size / (1024*1024):.2f} MB")
-                        
-                        # Save uploaded CSV
-                        csv_path = FEATURES_DIR / f"model_{uploaded_csv.name}"
-                        with open(csv_path, 'wb') as f:
-                            f.write(uploaded_csv.getvalue())
-                        
-                        st.session_state.model_csv_path = csv_path
-                        
-                        # Preview CSV
-                        with st.expander("👁️ Preview CSV Data"):
-                            try:
-                                df = pd.read_csv(csv_path)
-                                st.dataframe(df.head(10), use_container_width=True)
-                                st.caption(f"Showing first 10 rows of {len(df)} total rows")
-                            except Exception as e:
-                                st.error(f"Could not preview CSV: {e}")
-                                st.session_state.debug_info['subtab2_preview'] = f"Error: {str(e)}"
+                    st.info(f"**Features Available:** {len(st.session_state.features_df)} feature vectors")
+                    st.info(f"**Model:** Baseline XGBoost Binary Classifier")
                 
                 with col2:
-                    if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
-                        st.metric("Status", "CSV uploaded")
-                        st.metric("File", st.session_state.model_csv_path.name)
+                    if st.button("🚀 Run Prediction", use_container_width=True, type="primary"):
+                        with st.spinner("Preparing features and running prediction..."):
+                            try:
+                                # Prepare features for prediction
+                                X = ModelManager.prepare_features_for_prediction(st.session_state.features_df)
+                                
+                                # Make predictions
+                                predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
+                                
+                                if len(predictions) > 0:
+                                    # Create prediction summary
+                                    summary = ModelManager.create_prediction_summary(predictions, probabilities)
+                                    
+                                    # Store in session state
+                                    st.session_state.model_predictions = predictions
+                                    st.session_state.model_summary = summary
+                                    st.session_state.model_probabilities = probabilities
+                                    
+                                    st.success("✅ Prediction completed successfully!")
+                                else:
+                                    st.error("❌ Prediction failed. No valid predictions generated.")
+                            except Exception as e:
+                                st.error(f"❌ Error during prediction: {str(e)}")
+                                logger.error(f"Prediction error: {e}")
                 
-                # Run prediction on uploaded CSV
-                if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
-                    st.markdown("---")
-                    st.subheader("🔮 Run Model Prediction")
-                    
-                    col1, col2 = st.columns([2, 1])
-                    
-                    with col1:
-                        st.info(f"**CSV File:** {st.session_state.model_csv_path.name}")
-                        st.caption(f"📏 Size: {st.session_state.model_csv_path.stat().st_size / 1024:.1f} KB")
-                    
-                    with col2:
-                        if st.button("🚀 Run Prediction", use_container_width=True, type="primary", key="predict_model_csv"):
-                            st.session_state.debug_info['subtab2_prediction'] = "Starting prediction..."
-                            
-                            with st.spinner("Preparing features and running prediction..."):
-                                try:
-                                    # Load features from CSV
-                                    st.session_state.debug_info['subtab2_prediction'] = "Loading CSV..."
-                                    df_features = pd.read_csv(st.session_state.model_csv_path)
-                                    
-                                    # Prepare features for prediction
-                                    st.session_state.debug_info['subtab2_prediction'] = "Preparing features..."
-                                    X = ModelManager.prepare_features_for_prediction(df_features)
-                                    
-                                    # Make predictions
-                                    st.session_state.debug_info['subtab2_prediction'] = "Making predictions..."
-                                    predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
-                                    
-                                    if len(predictions) > 0:
-                                        # Create prediction summary
-                                        st.session_state.debug_info['subtab2_prediction'] = "Creating summary..."
-                                        summary = ModelManager.create_prediction_summary(predictions, probabilities)
-                                        
-                                        # Store in session state
-                                        st.session_state.model_csv_predictions = predictions
-                                        st.session_state.model_csv_summary = summary
-                                        st.session_state.model_csv_probabilities = probabilities
-                                        
-                                        st.session_state.debug_info['subtab2_prediction'] = "Prediction completed successfully"
-                                        st.success("✅ Prediction completed successfully!")
-                                    else:
-                                        st.error("❌ Prediction failed. No valid predictions generated.")
-                                        st.session_state.debug_info['subtab2_prediction'] = "No valid predictions generated"
-                                except Exception as e:
-                                    st.error(f"❌ Error during prediction: {str(e)}")
-                                    logger.error(f"Prediction error: {e}")
-                                    st.session_state.debug_info['subtab2_prediction'] = f"Error: {str(e)}"
-                    
-                    # Display results if available
-                    if 'model_csv_predictions' in st.session_state and st.session_state.model_csv_predictions is not None:
-                        st.session_state.debug_info['subtab2_display'] = "Starting display..."
-                        
-                        try:
-                            df_features = pd.read_csv(st.session_state.model_csv_path)
-                            display_prediction_results(
-                                st.session_state.model_csv_predictions,
-                                st.session_state.model_csv_probabilities,
-                                st.session_state.model_csv_summary,
-                                df_features,
-                                baseline_model  # Pass the model to avoid global variable reference
-                            )
-                            st.session_state.debug_info['subtab2_display'] = "Display completed"
-                        except Exception as e:
-                            st.error(f"❌ Error displaying results: {str(e)}")
-                            logger.error(f"Error displaying results: {e}")
-                            st.session_state.debug_info['subtab2_display'] = f"Error: {str(e)}"
-                else:
-                    st.info("👆 Upload a feature CSV file to begin analysis.")
+                # Display results if available
+                if st.session_state.model_predictions is not None:
+                    display_prediction_results(
+                        st.session_state.model_predictions,
+                        st.session_state.model_probabilities,
+                        st.session_state.model_summary,
+                        st.session_state.features_df
+                    )
+        
+        # Sub-tab 2: Use features from uploaded CSV
+        with subtab2:
+            st.markdown("---")
+            st.subheader("📁 Upload Feature CSV for Model Prediction")
             
-            # Sub-tab 3: Process raw pose data
-            with subtab3:
-                st.session_state.debug_info['subtab3'] = "Entered subtab3"
+            # Add instructions
+            with st.expander("📖 CSV Format Instructions"):
+                st.markdown("""
+                The uploaded CSV should contain extracted gait features with the following columns:
+                - step_height_symmetry
+                - step_length_symmetry
+                - cadence_asym
+                - knee_rom_asym
+                - hip_rom_asym
+                - [Other gait features...]
                 
-                st.markdown("---")
-                st.subheader("📁 Upload Raw Pose Data for Analysis")
-                
-                # Add instructions
-                with st.expander("📖 Raw Pose Data Format"):
-                    st.markdown("""
-                    The uploaded CSV should contain MediaPipe pose landmarks with the following columns:
-                    - frame: Frame number
-                    - landmark_id: Landmark index (0-32)
-                    - x_norm: Normalized X coordinate
-                    - y_norm: Normalized Y coordinate
-                    - z_norm: Normalized Z coordinate
-                    - video_id: (Optional) Video identifier
-                    
-                    **Note**: This option processes raw pose data and extracts features automatically.
-                    """)
-                
-                uploaded_pose_csv = st.file_uploader(
-                    "Upload a CSV file with MediaPipe pose landmarks",
+                **Note**: If you have raw pose data (landmarks), please use the "From Raw Pose Data" tab.
+                """)
+            
+            # Add template download
+            template_path = Path("templates/feature_template.csv")
+            if template_path.exists():
+                with open(template_path, "rb") as f:
+                    st.download_button(
+                        "📥 Download Feature Template",
+                        data=f.read(),
+                        file_name="feature_template.csv",
+                        mime="text/csv"
+                    )
+            else:
+                st.warning("Feature template not available")
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                uploaded_csv = st.file_uploader(
+                    "Upload a CSV file with extracted features",
                     type=['csv'],
-                    help="Upload a CSV file containing pose landmarks (x_norm, y_norm, z_norm) for each frame",
-                    key="pose_csv_upload"
+                    help="Upload a CSV file containing the extracted features for prediction",
+                    key="model_csv_upload"
                 )
                 
-                if uploaded_pose_csv:
-                    st.session_state.debug_info['subtab3_upload'] = "File uploaded"
-                    
-                    # Check file size to prevent memory issues
-                    if uploaded_pose_csv.size > 50 * 1024 * 1024:  # 50MB limit
-                        st.error("File too large. Please upload a smaller file or split it into multiple files.")
-                        st.session_state.debug_info['subtab3_upload'] = "File too large"
-                        return
+                if uploaded_csv:
+                    st.info(f"📄 {uploaded_csv.name}")
+                    st.info(f"📏 {uploaded_csv.size / (1024*1024):.2f} MB")
                     
                     # Save uploaded CSV
-                    pose_csv_path = FEATURES_DIR / f"pose_{uploaded_pose_csv.name}"
-                    with open(pose_csv_path, 'wb') as f:
-                        f.write(uploaded_pose_csv.getvalue())
+                    csv_path = FEATURES_DIR / f"model_{uploaded_csv.name}"
+                    with open(csv_path, 'wb') as f:
+                        f.write(uploaded_csv.getvalue())
+                    
+                    st.session_state.model_csv_path = csv_path
                     
                     # Preview CSV
-                    with st.expander("👁️ Preview Pose Data"):
+                    with st.expander("👁️ Preview CSV Data"):
                         try:
-                            df = pd.read_csv(pose_csv_path)
+                            df = pd.read_csv(csv_path)
                             st.dataframe(df.head(10), use_container_width=True)
                             st.caption(f"Showing first 10 rows of {len(df)} total rows")
                         except Exception as e:
                             st.error(f"Could not preview CSV: {e}")
-                            st.session_state.debug_info['subtab3_preview'] = f"Error: {str(e)}"
-                    
-                    # Run analysis
-                    if st.button("🚀 Analyze Pose Data", use_container_width=True, type="primary"):
-                        st.session_state.debug_info['subtab3_analysis'] = "Starting analysis..."
-                        
-                        with st.spinner("Processing pose data and running prediction..."):
-                            progress_bar = st.progress(0)
-                            status_placeholder = st.empty()
-                            
+            
+            with col2:
+                if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
+                    st.metric("Status", "CSV uploaded")
+                    st.metric("File", st.session_state.model_csv_path.name)
+            
+            # Run prediction on uploaded CSV
+            if 'model_csv_path' in st.session_state and st.session_state.model_csv_path:
+                st.markdown("---")
+                st.subheader("🔮 Run Model Prediction")
+                
+                col1, col2 = st.columns([2, 1])
+                
+                with col1:
+                    st.info(f"**CSV File:** {st.session_state.model_csv_path.name}")
+                    st.caption(f"📏 Size: {st.session_state.model_csv_path.stat().st_size / 1024:.1f} KB")
+                
+                with col2:
+                    if st.button("🚀 Run Prediction", use_container_width=True, type="primary", key="predict_model_csv"):
+                        with st.spinner("Preparing features and running prediction..."):
                             try:
-                                # Update progress
-                                progress_bar.progress(25)
-                                status_placeholder.text("Extracting features from pose data...")
-                                st.session_state.debug_info['subtab3_analysis'] = "Extracting features..."
+                                # Load features from CSV
+                                df_features = pd.read_csv(st.session_state.model_csv_path)
                                 
-                                # Check if predict_from_pose_csv method exists
-                                if not hasattr(GaitAnalysisEngine, 'predict_from_pose_csv'):
-                                    st.error("The method predict_from_pose_csv is not available in GaitAnalysisEngine.")
-                                    logger.error("predict_from_pose_csv method not found")
-                                    st.session_state.debug_info['subtab3_analysis'] = "Method not found"
-                                    return
+                                # Prepare features for prediction
+                                X = ModelManager.prepare_features_for_prediction(df_features)
                                 
-                                # Process pose data and make predictions
-                                progress_bar.progress(50)
-                                status_placeholder.text("Running prediction...")
-                                st.session_state.debug_info['subtab3_analysis'] = "Running prediction..."
+                                # Make predictions
+                                predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
                                 
-                                df_results, probabilities = GaitAnalysisEngine.predict_from_pose_csv(
-                                    pose_csv_path, 
-                                    model=baseline_model
-                                )
+                                if len(predictions) > 0:
+                                    # Create prediction summary
+                                    summary = ModelManager.create_prediction_summary(predictions, probabilities)
+                                    
+                                    # Store in session state
+                                    st.session_state.model_csv_predictions = predictions
+                                    st.session_state.model_csv_summary = summary
+                                    st.session_state.model_csv_probabilities = probabilities
+                                    
+                                    st.success("✅ Prediction completed successfully!")
+                                else:
+                                    st.error("❌ Prediction failed. No valid predictions generated.")
+                            except Exception as e:
+                                st.error(f"❌ Error during prediction: {str(e)}")
+                                logger.error(f"Prediction error: {e}")
+                
+                # Display results if available
+                if 'model_csv_predictions' in st.session_state and st.session_state.model_csv_predictions is not None:
+                    df_features = pd.read_csv(st.session_state.model_csv_path)
+                    display_prediction_results(
+                        st.session_state.model_csv_predictions,
+                        st.session_state.model_csv_probabilities,
+                        st.session_state.model_csv_summary,
+                        df_features
+                    )
+            else:
+                st.info("👆 Upload a feature CSV file to begin analysis.")
+        
+        # Sub-tab 3: Process raw pose data
+        with subtab3:
+            st.markdown("---")
+            st.subheader("📁 Upload Raw Pose Data for Analysis")
+            
+            # Add instructions
+            with st.expander("📖 Raw Pose Data Format"):
+                st.markdown("""
+                The uploaded CSV should contain MediaPipe pose landmarks with the following columns:
+                - frame: Frame number
+                - landmark_id: Landmark index (0-32)
+                - x_norm: Normalized X coordinate
+                - y_norm: Normalized Y coordinate
+                - z_norm: Normalized Z coordinate
+                - video_id: (Optional) Video identifier
+                
+                **Note**: This option processes raw pose data and extracts features automatically.
+                """)
+            
+            uploaded_pose_csv = st.file_uploader(
+                "Upload a CSV file with MediaPipe pose landmarks",
+                type=['csv'],
+                help="Upload a CSV file containing pose landmarks (x_norm, y_norm, z_norm) for each frame",
+                key="pose_csv_upload"
+            )
+            
+            if uploaded_pose_csv:
+                # Check file size to prevent memory issues
+                if uploaded_pose_csv.size > 50 * 1024 * 1024:  # 50MB limit
+                    st.error("File too large. Please upload a smaller file or split it into multiple files.")
+                    return
+                
+                # Save uploaded CSV
+                pose_csv_path = FEATURES_DIR / f"pose_{uploaded_pose_csv.name}"
+                with open(pose_csv_path, 'wb') as f:
+                    f.write(uploaded_pose_csv.getvalue())
+                
+                # Preview CSV
+                with st.expander("👁️ Preview Pose Data"):
+                    try:
+                        df = pd.read_csv(pose_csv_path)
+                        st.dataframe(df.head(10), use_container_width=True)
+                        st.caption(f"Showing first 10 rows of {len(df)} total rows")
+                    except Exception as e:
+                        st.error(f"Could not preview CSV: {e}")
+                
+                # Run analysis
+                if st.button("🚀 Analyze Pose Data", use_container_width=True, type="primary"):
+                    with st.spinner("Processing pose data and running prediction..."):
+                        progress_bar = st.progress(0)
+                        status_placeholder = st.empty()
+                        
+                        try:
+                            # Update progress
+                            progress_bar.progress(25)
+                            status_placeholder.text("Extracting features from pose data...")
+                            
+                            # Extract features from pose data
+                            df_features, gait_cycles = GaitAnalysisEngine.extract_features_from_csv(pose_csv_path)
+                            
+                            if df_features.empty:
+                                st.error("❌ Failed to extract features from pose data.")
+                                return
+                            
+                            # Update progress
+                            progress_bar.progress(50)
+                            status_placeholder.text("Running prediction...")
+                            
+                            # Prepare features for prediction
+                            X = ModelManager.prepare_features_for_prediction(df_features)
+                            
+                            # Make predictions
+                            predictions, probabilities = ModelManager.predict_with_baseline(baseline_model, X)
+                            
+                            if len(predictions) > 0:
+                                # Create prediction summary
+                                summary = ModelManager.create_prediction_summary(predictions, probabilities)
+                                
+                                # Store in session state
+                                st.session_state.pose_predictions = predictions
+                                st.session_state.pose_probabilities = probabilities
+                                st.session_state.pose_summary = summary
+                                st.session_state.pose_results_df = df_features.copy()
+                                st.session_state.pose_results_df['prediction'] = predictions
+                                st.session_state.pose_results_df['confidence'] = np.max(probabilities, axis=1)
+                                st.session_state.pose_results_df['predicted_label'] = ['Normal' if p == 0 else 'Abnormal' for p in predictions]
                                 
                                 # Update progress
                                 progress_bar.progress(75)
                                 status_placeholder.text("Analyzing results...")
-                                st.session_state.debug_info['subtab3_analysis'] = "Analyzing results..."
                                 
-                                if df_results is not None and len(df_results) > 0:
-                                    # Store in session state
-                                    st.session_state.pose_predictions = df_results['prediction'].values
-                                    st.session_state.pose_probabilities = probabilities
-                                    
-                                    # Create summary
-                                    predictions = df_results['prediction'].values
-                                    normal_count = np.sum(predictions == 0)
-                                    abnormal_count = np.sum(predictions == 1)
-                                    summary = {
-                                        'total_windows': len(predictions),
-                                        'normal_windows': int(normal_count),
-                                        'abnormal_windows': int(abnormal_count),
-                                        'abnormal_percentage': 100 * abnormal_count / len(predictions)
-                                    }
-                                    st.session_state.pose_summary = summary
-                                    st.session_state.pose_results_df = df_results
-                                    
-                                    # Complete progress
-                                    progress_bar.progress(100)
-                                    status_placeholder.empty()
-                                    
-                                    st.session_state.debug_info['subtab3_analysis'] = "Analysis completed successfully"
-                                    st.success("✅ Analysis completed successfully!")
-                                else:
-                                    progress_bar.empty()
-                                    status_placeholder.empty()
-                                    st.error("❌ Analysis failed. No valid results generated.")
-                                    st.session_state.debug_info['subtab3_analysis'] = "No valid results generated"
-                            except Exception as e:
+                                # Complete progress
+                                progress_bar.progress(100)
+                                status_placeholder.empty()
+                                
+                                st.success("✅ Analysis completed successfully!")
+                            else:
                                 progress_bar.empty()
                                 status_placeholder.empty()
-                                st.error(f"❌ Error during analysis: {str(e)}")
-                                logger.error(f"Pose analysis error: {e}")
-                                st.session_state.debug_info['subtab3_analysis'] = f"Error: {str(e)}"
-                    
-                    # Display results if available
-                    if 'pose_predictions' in st.session_state and st.session_state.pose_predictions is not None:
-                        st.session_state.debug_info['subtab3_display'] = "Starting display..."
-                        
-                        try:
-                            display_prediction_results(
-                                st.session_state.pose_predictions,
-                                st.session_state.pose_probabilities,
-                                st.session_state.pose_summary,
-                                st.session_state.pose_results_df,
-                                baseline_model  # Pass the model to avoid global variable reference
-                            )
-                            st.session_state.debug_info['subtab3_display'] = "Display completed"
+                                st.error("❌ Analysis failed. No valid results generated.")
                         except Exception as e:
-                            st.error(f"❌ Error displaying results: {str(e)}")
-                            logger.error(f"Error displaying results: {e}")
-                            st.session_state.debug_info['subtab3_display'] = f"Error: {str(e)}"
-                else:
-                    st.info("👆 Upload a pose CSV file to begin analysis.")
-        
-        except Exception as e:
-            st.error(f"❌ Unexpected error in Model Prediction tab: {str(e)}")
-            logger.error(f"Unexpected error in Model Prediction tab: {e}")
-            st.session_state.debug_info['unexpected_error'] = str(e)
-            st.code(traceback.format_exc())
+                            progress_bar.empty()
+                            status_placeholder.empty()
+                            st.error(f"❌ Error during analysis: {str(e)}")
+                            logger.error(f"Pose analysis error: {e}")
+                
+                # Display results if available
+                if 'pose_predictions' in st.session_state and st.session_state.pose_predictions is not None:
+                    display_prediction_results(
+                        st.session_state.pose_predictions,
+                        st.session_state.pose_probabilities,
+                        st.session_state.pose_summary,
+                        st.session_state.pose_results_df
+                    )
+            else:
+                st.info("👆 Upload a pose CSV file to begin analysis.")
 
 def display_prediction_results(predictions, probabilities, summary, features_df, model=None):
     """Display prediction results with enhanced visualizations"""
