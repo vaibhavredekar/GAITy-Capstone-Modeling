@@ -1,14 +1,10 @@
 """
 Important
 ---------
-This module still relies on `gait_preprocessing_pipeline` for:
-- `normalize_pose_3d`, `N_JOINTS`, and MediaPipe joint indices.
-
 `Pose_Preprocessing_Pipeline_2.py` should be run first to produce windowed
 arrays (N, T, 33, 3). Those windows are then passed to
 `extract_features_from_windows`.
 """
-
 
 import numpy as np
 import pandas as pd
