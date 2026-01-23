@@ -1,0 +1,14 @@
+```pip-requirements
+# Streamlit / analytics environment (requires numpy >= 2)
+numpy>=2.2.1
+pandas>=2.2.3
+streamlit>=1.37.0
+plotly>=5.23.0
+protobuf>=5.27.3
+streamlit-analytics2>=0.10.5
+streamlit-extras>=0.7.8
+streamlit-image-coordinates>=0.4.0
+st-theme>=1.2.3
+grpcio-status>=1.76.0
+opencv-python>=4.12.0.88
+```

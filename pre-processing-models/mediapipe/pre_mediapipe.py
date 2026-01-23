@@ -1,5 +1,4 @@
 """
-MediaPipe Pose Detection Pipeline
 Production-grade, OOP implementation with batch processing support
 FIXED: Unicode encoding errors and path validation
 """
@@ -21,6 +20,31 @@ import json
 from datetime import datetime
 import traceback
 
+import os
+import sys
+import warnings
+
+# Suppress TensorFlow warnings
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # Set to 3 to suppress all TensorFlow logs
+os.environ['TF_MIN_LOG_LEVEL'] = '3'
+
+# Suppress absl logging
+os.environ['ABSL_LOG_MIN_LEVEL'] = '3'  # Set to 3 to suppress all absl logs
+
+# Suppress all warnings for cleaner output
+warnings.filterwarnings("ignore")
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# Monkey patch to suppress protobuf warnings
+original_warn = warnings.warn
+
+def custom_warn(*args, **kwargs):
+    if len(args) >= 1 and isinstance(args[0], str) and "SymbolDatabase.GetPrototype" in args[0]:
+        return  # Suppress this specific warning
+    return original_warn(*args, **kwargs)
+
+warnings.warn = custom_warn
 
 # ============================================================
 # PATH RESOLUTION
@@ -68,8 +92,8 @@ class ProcessMode(Enum):
     IMAGE = "image"
     VIDEO = "video"
 
-
 @dataclass
+
 class PipelineConfig:
     """Configuration for pose detection pipeline"""
     

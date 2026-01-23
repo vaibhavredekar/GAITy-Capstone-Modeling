@@ -136,3 +136,5 @@ mlruns
 
 #config file has sensitive data
 .mlflow_uri
+
+mediapipe_env

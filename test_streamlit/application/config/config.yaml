@@ -1,0 +1,47 @@
+app:
+  debug: false
+  name: Clinical Gait Analysis System
+  version: 1.0.0
+clinical:
+  age_groups:
+  - Child (<18)
+  - Adult (18-65)
+  - Elderly (65+)
+  severity_thresholds:
+    high: 0.9
+    low: 0.6
+    moderate: 0.75
+features:
+  enable_advanced_features: true
+  min_gait_cycles: 2
+  smoothing_window: 11
+mediapipe:
+  min_detection_confidence: 0.5
+  min_tracking_confidence: 0.5
+  model_complexity: 1
+models:
+  binary:
+    threshold: 0.5
+    type: random_forest
+  multiclass:
+    min_confidence: 0.6
+    type: random_forest
+paths:
+  models: ./models
+  processed: ./data/processed
+  results: ./data/results
+  uploads: ./data/uploads
+ui:
+  auto_export_report: false
+  show_progress: true
+  show_workflow: true
+  theme: light
+video:
+  max_file_size_mb: 500
+  output_fps: 30
+  skeleton_background: black
+  skeleton_color: white
+  supported_formats:
+  - mp4
+  - avi
+  - mov
