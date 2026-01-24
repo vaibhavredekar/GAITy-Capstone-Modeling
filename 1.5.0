@@ -1,0 +1,17 @@
+Collecting pandas
+  Using cached pandas-3.0.0-cp313-cp313-win_amd64.whl.metadata (19 kB)
+Requirement already satisfied: numpy>=1.26.0 in c:\git_personal_projects\gaity-capstone-modeling\.appenv\lib\site-packages (from pandas) (2.4.1)
+Collecting python-dateutil>=2.8.2 (from pandas)
+  Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl.metadata (8.4 kB)
+Collecting tzdata (from pandas)
+  Using cached tzdata-2025.3-py2.py3-none-any.whl.metadata (1.4 kB)
+Collecting six>=1.5 (from python-dateutil>=2.8.2->pandas)
+  Using cached six-1.17.0-py2.py3-none-any.whl.metadata (1.7 kB)
+Downloading pandas-3.0.0-cp313-cp313-win_amd64.whl (9.7 MB)
+   ---------------------------------------- 9.7/9.7 MB 2.4 MB/s  0:00:04
+Using cached python_dateutil-2.9.0.post0-py2.py3-none-any.whl (229 kB)
+Using cached six-1.17.0-py2.py3-none-any.whl (11 kB)
+Using cached tzdata-2025.3-py2.py3-none-any.whl (348 kB)
+Installing collected packages: tzdata, six, python-dateutil, pandas
+
+Successfully installed pandas-3.0.0 python-dateutil-2.9.0.post0 six-1.17.0 tzdata-2025.3
