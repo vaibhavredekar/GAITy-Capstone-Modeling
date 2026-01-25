@@ -2,7 +2,7 @@
   "model_path": "models/pose_landmarker_heavy.task",
   "output_dir": "data/output",
   "input_paths": [
-    "data\\uploads\\test_video.mp4"
+    "data\\uploads\\cljarbn1y00cg3n6l1u4i0d5l_front_nan_Abnormal Gait_cerebral palsy.mp4"
   ],
   "batch_mode": true,
   "save_annotated": true,
