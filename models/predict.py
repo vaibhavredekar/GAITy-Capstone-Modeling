@@ -14,7 +14,8 @@ Features:
 Usage:
     python predict_gait.py --input data.csv --output predictions.csv
     python predict_gait.py --input data.csv  # Prints results to console
-    python predict_gait.py --help  # Show help
+    python predict_gait.py --test  # Run with dummy data
+    python predict_gait.py --info  # Show model information
 """
 
 import json
@@ -29,7 +30,6 @@ from typing import Optional, Tuple, Dict, Any, Union, List
 from dataclasses import dataclass
 import time
 from datetime import datetime
-import joblib  # Alternative for saving/loading if needed
 
 # Configure logging
 logging.basicConfig(
@@ -104,9 +104,9 @@ class GaitPredictor:
         self.is_loaded = False
         
         # Model file paths
-        self.model_path = self.model_dir / "xgboost_model.bin"
-        self.features_path = self.model_dir / "feature_names.json"
-        self.metadata_path = self.model_dir / "model_metadata.json"
+        self.model_path = self.model_dir /  "xgboost_model.bin"
+        self.features_path = self.model_dir /  "feature_names.json"
+        self.metadata_path = self.model_dir /  "model_metadata.json"
         
         # Statistics for monitoring
         self.predictions_count = 0
@@ -234,10 +234,6 @@ class GaitPredictor:
         
         # Ensure correct data types
         processed_data = processed_data.astype(np.float32)
-        
-        # Optionally: Apply same scaling/transformation as training data
-        # if self.scaler is not None:
-        #     processed_data = self.scaler.transform(processed_data)
         
         logger.info(f"Preprocessed data shape: {processed_data.shape}")
         return processed_data
@@ -443,8 +439,8 @@ Examples:
                        help='Input CSV/Excel file containing features')
     parser.add_argument('--output', '-o', type=Path, 
                        help='Output file for predictions (CSV/Excel)')
-    parser.add_argument('--model-dir', '-m', type=Path, default=Path.cwd(),
-                       help='Directory containing model files (default: current directory)')
+    parser.add_argument('--model-dir', '-m', type=Path, default=Path(__file__).parent,
+                       help='Directory containing the script and model files (default: script directory)')
     parser.add_argument('--test', action='store_true',
                        help='Test prediction with dummy data')
     parser.add_argument('--info', action='store_true',
