@@ -2,7 +2,7 @@
   "model_path": "models/pose_landmarker_heavy.task",
   "output_dir": "data/output",
   "input_paths": [
-    "data\\uploads\\cljar9bqo00c43n6l2u5zmlru_left side_nan_Abnormal Gait_cerebral palsy.mp4"
+    "data\\uploads\\cljarbn1y00cg3n6l1u4i0d5l_front_nan_Abnormal Gait_cerebral palsy.mp4"
   ],
   "batch_mode": true,
   "save_annotated": true,
@@ -56,5 +56,15 @@
     ".mov",
     ".avi",
     ".mkv"
-  ]
+  ],
+  "db_path": "landmark_database.db",
+  "log_path": "processing.log",
+  "log_level": "INFO",
+  "semantic_dir": "./data/csv/Health_Gait_0_397",
+  "seq_dir": "./data/csv/MissionGait",
+  "summary_file_path": "./data/csv/merged_summary_enriched_full_final.xlsx",
+  "max_workers": 8,
+  "chunk_size": 2000,
+  "retry_attempts": 3,
+  "retry_delay": 1.0
 }
