@@ -138,3 +138,6 @@ mlruns
 .mlflow_uri
 
 mediapipe_env
+
+*.parquet
+*.task
