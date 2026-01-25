@@ -141,3 +141,7 @@ mediapipe_env
 
 *.parquet
 *.task
+*.bin
+
+models\.bin
+models/xgboost_model.bin

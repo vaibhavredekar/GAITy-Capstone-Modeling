@@ -872,6 +872,117 @@ class BaselineModel:
 #     }
 
 
+# def run_baseline_modeling():
+#     """
+#     Run the complete baseline modeling pipeline.
+#     This version calculates the data path robustly.
+        
+#     Returns:
+#         Dictionary containing model, evaluation metrics, and visualizations
+#     """
+#     # --- FIX IS HERE ---
+#     # Determine the project root directory relative to this script
+#     # This assumes the script is in 'm_implementation' and data is in the project root.
+#     PROJECT_ROOT = Path(__file__).resolve().parent.parent
+#     data_path = PROJECT_ROOT / "filled_gait_data_encoded.parquet"
+    
+#     print(f"Project root determined as: {PROJECT_ROOT}")
+#     print(f"Looking for data at: {data_path}")
+    
+#     # Initialize the baseline model
+#     baseline = BaselineModel()
+    
+#     # Prepare data
+#     print("Preparing data...")
+#     X, y, groups = baseline.prepare_data(
+#         data_path=data_path,  # Pass the absolute path
+#         window_seconds=2.0,
+#         overlap=0.5,
+#         resample_frames=60,
+#         threshold_pct=5.0
+#     )
+    
+#     # Split data
+#     print("Splitting data...")
+#     baseline.split_data(X, y, groups, test_size=0.2, random_state=42)
+    
+#     # Train model with FAST parameters for a quick test run
+#     print("Training model with FAST parameters for a quick test...")
+#     baseline.train_model(
+#         n_estimators=50,      # Reduced from 300 to 50
+#         learning_rate=0.1,    # Increased from 0.05 to 0.1
+#         max_depth=4,
+#         subsample=0.8,
+#         colsample_bytree=0.8,
+#         random_state=42
+#     )
+    
+#     # Evaluate model
+#     print("Evaluating model...")
+#     results = baseline.evaluate_model()
+    
+#     # Print evaluation results
+#     print("\nClassification Report:")
+#     print(classification_report(baseline.y_test, baseline.model.predict(baseline.X_test), 
+#                                target_names=["normal", "abnormal"]))
+#     print(f"ROC-AUC: {results['roc_auc']:.4f}")
+#     print(f"Data leakage (shared patients): {results['data_leakage']}")
+    
+#     # Save model
+#     print("\nSaving model...")
+#     baseline.save_model()
+    
+#     # Save the feature names for the prediction script
+#     import json
+#     out_dir = Path("models")
+#     feature_names_path = out_dir / "feature_names.json"
+#     with open(feature_names_path, 'w') as f:
+#         json.dump(baseline.feature_names, f, indent=2)
+#     print(f"Feature names saved to: {feature_names_path.resolve()}")
+    
+#     # Create visualizations
+#     print("Creating visualizations...")
+#     cm = results['confusion_matrix']
+    
+#     # Confusion matrix
+#     fig1, ax1 = baseline.plot_confusion_matrix(
+#         cm, 
+#         class_names=("Normal", "Abnormal"), 
+#         title="Gait classifier outcomes"
+#     )
+    
+#     # Out of 100 bar chart
+#     fig2, ax2 = baseline.plot_out_of_100(
+#         cm, 
+#         title="Gait classifier: results per 100 cases"
+#     )
+    
+#     # Out of 100 pie charts
+#     fig3 = baseline.plot_out_of_100_pies(
+#         cm, 
+#         title="Gait classifier performance (out of 100 cases)"
+#     )
+    
+#     # Save visualizations
+#     out_dir = Path("visualizations")
+#     out_dir.mkdir(exist_ok=True)
+    
+#     fig1.savefig(out_dir / "confusion_matrix.png")
+#     fig2.savefig(out_dir / "out_of_100.png")
+#     fig3.savefig(out_dir / "out_of_100_pies.png")
+    
+#     print(f"Visualizations saved to {out_dir.resolve()}")
+    
+#     return {
+#         "model": baseline.model,
+#         "baseline": baseline,
+#         "results": results,
+#         "confusion_matrix_fig": fig1,
+#         "out_of_100_fig": fig2,
+#         "out_of_100_pies_fig": fig3
+#     }
+
+
 def run_baseline_modeling():
     """
     Run the complete baseline modeling pipeline.
@@ -880,7 +991,6 @@ def run_baseline_modeling():
     Returns:
         Dictionary containing model, evaluation metrics, and visualizations
     """
-    # --- FIX IS HERE ---
     # Determine the project root directory relative to this script
     # This assumes the script is in 'm_implementation' and data is in the project root.
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -906,11 +1016,12 @@ def run_baseline_modeling():
     print("Splitting data...")
     baseline.split_data(X, y, groups, test_size=0.2, random_state=42)
     
-    # Train model with FAST parameters for a quick test run
-    print("Training model with FAST parameters for a quick test...")
+    # --- CHANGE IS HERE ---
+    # Train model with the original, full parameters for the final model
+    print("Training model with full parameters for the final model...")
     baseline.train_model(
-        n_estimators=50,      # Reduced from 300 to 50
-        learning_rate=0.1,    # Increased from 0.05 to 0.1
+        n_estimators=300,     # Reverted to original value
+        learning_rate=0.05,   # Reverted to original value
         max_depth=4,
         subsample=0.8,
         colsample_bytree=0.8,
