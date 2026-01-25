@@ -1,0 +1,8 @@
+[server]
+maxUploadSize = 2000
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+serverAddress = "0.0.0.0"
