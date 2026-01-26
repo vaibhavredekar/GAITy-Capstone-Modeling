@@ -18,6 +18,7 @@ from functools import wraps
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+import imageio
 
 # Environment configuration
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -418,7 +419,6 @@ class VideoConverter:
         return video_path
 
 
-
 class FileManager:
     """Production-grade file management"""
     
@@ -634,75 +634,200 @@ class PipelineManager:
             logger.error(f"Pipeline failed: {e}")
             return None
 
+# class VideoDisplay:
+    
+#     @staticmethod
+#     def get_video_info(video_path: Path) -> Optional[dict]:
+#         try:
+#             cap = cv2.VideoCapture(str(video_path))
+#             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+#             codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)]).strip()
+            
+#             info = {
+#                 'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+#                 'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+#                 'fps': cap.get(cv2.CAP_PROP_FPS) or 30,
+#                 'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+#                 'duration': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 30),
+#                 'size_mb': video_path.stat().st_size / (1024 * 1024),
+#                 'codec': codec
+#             }
+#             cap.release()
+#             return info
+#         except Exception as e:
+#             return None
+    
+#     @staticmethod
+#     def display_video_with_download(video_path: Optional[Path], label: str, key_suffix: str) -> None:
+#         st.markdown(f"**{label}**")
+        
+#         if not video_path or not video_path.exists():
+#             st.warning("⚠️ Video not found")
+#             return
+        
+#         try:
+#             web_video = VideoConverter.ensure_web_compatible(video_path)
+            
+#             with open(web_video, 'rb') as video_file:
+#                 video_bytes = video_file.read()
+#                 st.video(video_bytes)
+            
+#             col1, col2 = st.columns([3, 1])
+            
+#             with col1:
+#                 info = VideoDisplay.get_video_info(web_video)
+#                 if info:
+#                     codec_status = "✅" if VideoConverter.is_web_compatible(info['codec']) else "⚠️"
+#                     st.caption(f"📊 {info['width']}×{info['height']} | {info['fps']:.0f} FPS | {info['duration']:.1f}s | {info['size_mb']:.1f} MB | {codec_status} {info['codec']}")
+            
+#             with col2:
+#                 file_data_key = f"data_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
+#                 widget_key = f"widget_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
+                
+#                 if file_data_key not in st.session_state:
+#                     try:
+#                         with open(web_video, 'rb') as f:
+#                             st.session_state[file_data_key] = f.read()
+#                     except Exception:
+#                         st.session_state[file_data_key] = None
+                
+#                 if st.session_state[file_data_key]:
+#                     st.download_button(
+#                         "📥 Download",
+#                         data=st.session_state[file_data_key],
+#                         file_name=web_video.name,
+#                         mime="video/mp4",
+#                         key=widget_key,
+#                         use_container_width=True
+#                     )
+        
+#         except Exception as e:
+#             st.error(f"❌ Display error: {str(e)}")
+
 class VideoDisplay:
     
     @staticmethod
     def get_video_info(video_path: Path) -> Optional[dict]:
+        """
+        Robustly extracts video metadata.
+        Uses try/finally to ensure the video capture resource is always released.
+        """
+        cap = None
         try:
+            if not video_path.exists():
+                return None
+                
             cap = cv2.VideoCapture(str(video_path))
-            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-            codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)]).strip()
+            if not cap.isOpened():
+                logger.error(f"Cannot open video for info: {video_path}")
+                return None
+
+            fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
+            # Decode fourcc
+            fourcc_str = "".join([chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)]).strip()
             
-            info = {
-                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-                'fps': cap.get(cv2.CAP_PROP_FPS) or 30,
-                'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-                'duration': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 30),
-                'size_mb': video_path.stat().st_size / (1024 * 1024),
-                'codec': codec
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Calculate duration safely
+            duration = 0
+            if fps > 0:
+                duration = frame_count / fps
+            
+            # Get file size
+            size_mb = video_path.stat().st_size / (1024 * 1024)
+
+            return {
+                'width': width,
+                'height': height,
+                'fps': fps,
+                'frames': frame_count,
+                'duration': duration,
+                'size_mb': size_mb,
+                'codec': fourcc_str
             }
-            cap.release()
-            return info
         except Exception as e:
+            logger.error(f"Exception in get_video_info: {e}")
             return None
-    
+        finally:
+            if cap is not None:
+                cap.release()
+
     @staticmethod
     def display_video_with_download(video_path: Optional[Path], label: str, key_suffix: str) -> None:
+        """
+        Displays a video and provides a download button.
+        
+        - Uses VideoConverter to ensure compatibility.
+        - Passes file PATH to st.video (zero-copy) to prevent RAM spikes.
+        - Automatically handles .mp4 and .avi MIME types.
+        """
         st.markdown(f"**{label}**")
         
         if not video_path or not video_path.exists():
-            st.warning("⚠️ Video not found")
+            st.warning("⚠️ Video file not found")
             return
         
         try:
+            # 1. Ensure compatibility (might return .avi as fallback)
             web_video = VideoConverter.ensure_web_compatible(video_path)
             
-            with open(web_video, 'rb') as video_file:
-                video_bytes = video_file.read()
-                st.video(video_bytes)
+            if not web_video.exists():
+                st.error("❌ Converted video file is missing.")
+                return
+
+            # 2. Display Video
+            # Passing the string path allows Streamlit to stream the file efficiently
+            # without loading the whole thing into memory.
+            st.video(str(web_video))
             
-            col1, col2 = st.columns([3, 1])
+            # 3. Layout for Info and Download
+            col_info, col_download = st.columns([3, 1])
             
-            with col1:
+            with col_info:
                 info = VideoDisplay.get_video_info(web_video)
                 if info:
-                    codec_status = "✅" if VideoConverter.is_web_compatible(info['codec']) else "⚠️"
-                    st.caption(f"📊 {info['width']}×{info['height']} | {info['fps']:.0f} FPS | {info['duration']:.1f}s | {info['size_mb']:.1f} MB | {codec_status} {info['codec']}")
-            
-            with col2:
-                file_data_key = f"data_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
-                widget_key = f"widget_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
-                
-                if file_data_key not in st.session_state:
-                    try:
-                        with open(web_video, 'rb') as f:
-                            st.session_state[file_data_key] = f.read()
-                    except Exception:
-                        st.session_state[file_data_key] = None
-                
-                if st.session_state[file_data_key]:
-                    st.download_button(
-                        "📥 Download",
-                        data=st.session_state[file_data_key],
-                        file_name=web_video.name,
-                        mime="video/mp4",
-                        key=widget_key,
-                        use_container_width=True
+                    # Check codec compatibility status
+                    is_compat = VideoConverter.is_web_compatible(info['codec'])
+                    codec_status = "✅" if is_compat else "⚠️"
+                    
+                    ext_str = web_video.suffix.upper().replace('.', '')
+                    
+                    st.caption(
+                        f"📊 {info['width']}×{info['height']} | "
+                        f"{info['fps']:.0f} FPS | "
+                        f"{info['duration']:.1f}s | "
+                        f"{info['size_mb']:.1f} MB | "
+                        f"{codec_status} {info['codec']} ({ext_str})"
                     )
-        
+                else:
+                    st.caption("ℹ️ Metadata unavailable")
+
+            with col_download:
+                # 4. Download Button
+                # Determine correct MIME type based on file extension
+                if web_video.suffix.lower() == '.avi':
+                    mime_type = "video/x-msvideo"
+                elif web_video.suffix.lower() == '.mov':
+                    mime_type = "video/quicktime"
+                else:
+                    mime_type = "video/mp4"
+                
+                # Pass the Path object directly. Streamlit handles the file reading efficiently.
+                st.download_button(
+                    label="📥 Download",
+                    data=web_video, 
+                    file_name=web_video.name,
+                    mime=mime_type,
+                    key=f"dl_{key_suffix}", # Unique key for button state
+                    use_container_width=True
+                )
+
         except Exception as e:
-            st.error(f"❌ Display error: {str(e)}")
+            st.error(f"❌ Error displaying video: {str(e)}")
+            logger.exception("VideoDisplay error")
 
 class ExportManager:
     
