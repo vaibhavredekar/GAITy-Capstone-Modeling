@@ -6,7 +6,6 @@
 
 import os
 import pickle
-import shutil
 import sys
 import warnings
 import logging
@@ -1858,115 +1857,37 @@ def create_temporal_gait_heatmap(gait_cycles):
 # STREAMLIT APPLICATION
 # ══════════════════════════════════════════════════════════════════════════════
 
-# def main():
-#     st.set_page_config(page_title="Gait Analysis", page_icon="🎥", layout="wide", initial_sidebar_state="expanded")
-    
-#     st.markdown("""<style>
-#     body { background-color: #F0F2F5; color: #2C3E50; }
-#     .stButton>button { background-color: #2C3E50; color: white; border-radius: 5px; height: 3em; font-weight: bold; }
-#     h1, h2, h3 { color: #1F2937; font-family: 'Segoe UI', sans-serif; font-weight: 600; }
-#     </style>""", unsafe_allow_html=True)
-    
-#     st.title("🚶 Production-Grade Gait Analysis & AI Modelling")
-#     st.markdown("**Complete Pipeline: Processing, Feature Engineering, Analysis & Prediction**")
-#     st.markdown("---")
-    
-#     # Session State Initialization
-#     if 'predictor' not in st.session_state:
-#         st.session_state.predictor = ModelPredictor()
-    
-#     default_state = {
-#         'uploaded_video_path': None, 'processing_complete': False, 'output_videos': {},
-#         'features_df': None, 'gait_cycles': None, 
-#         'pred_binary_results': None, 'pred_multiclass_results': None,
-#         'csv_features_df': None
-#     }
-    
-#     for key, val in default_state.items():
-#         if key not in st.session_state: st.session_state[key] = val
-
-#     # Sidebar
-#     with st.sidebar:
-#         st.header("📋 System Status")
-#         def status_icon(path): return "✅" if path.exists() else "❌"
-#         st.write(f"Config: {status_icon(CONFIG_PATH)}")
-#         st.write(f"MediaPipe: {status_icon(MEDIAPIPE_SCRIPT)}")
-#         st.write(f"Binary Model: {status_icon(BINARY_MODEL_PATH)}")
-#         st.write(f"Binary Meta: {status_icon(BINARY_FEATURES_PATH)}")
-#         st.write(f"Multi Model: {status_icon(MULTICLASS_MODEL_PATH)}")
-#         st.write(f"Multi Meta: {status_icon(MULTICLASS_METADATA_PATH)}")
-        
-#         if st.button("🔄 Reset App"):
-#             for key in list(st.session_state.keys()):
-#                 del st.session_state[key]
-#             st.rerun()
 def main():
-    # --- Page Configuration ---
-    st.set_page_config(
-        page_title="Gait Analysis", 
-        page_icon="🎥", 
-        layout="wide", 
-        initial_sidebar_state="expanded"
-    )
+    st.set_page_config(page_title="Gait Analysis", page_icon="🎥", layout="wide", initial_sidebar_state="expanded")
     
-    # --- Custom CSS ---
     st.markdown("""<style>
     body { background-color: #F0F2F5; color: #2C3E50; }
     .stButton>button { background-color: #2C3E50; color: white; border-radius: 5px; height: 3em; font-weight: bold; }
     h1, h2, h3 { color: #1F2937; font-family: 'Segoe UI', sans-serif; font-weight: 600; }
-    /* Hide Streamlit default footer */
-    footer {visibility: hidden;}
     </style>""", unsafe_allow_html=True)
     
     st.title("🚶 Production-Grade Gait Analysis & AI Modelling")
     st.markdown("**Complete Pipeline: Processing, Feature Engineering, Analysis & Prediction**")
     st.markdown("---")
     
-    # --- Session State Initialization ---
-    
-    # 1. Initialize VideoHandler Temp Directory
-    # We do this early to ensure cleanup happens if needed
-    if "temp_dir" not in st.session_state:
-        import tempfile
-        st.session_state.temp_dir = Path(tempfile.mkdtemp())
-    
-    # 2. Initialize Predictor
+    # Session State Initialization
     if 'predictor' not in st.session_state:
-        # Assuming ModelPredictor is defined elsewhere
-        try:
-            st.session_state.predictor = ModelPredictor()
-        except NameError:
-            st.warning("ModelPredictor class not found. Running in UI-only mode.")
+        st.session_state.predictor = ModelPredictor()
     
-    # 3. Initialize Default States
     default_state = {
-        'uploaded_video_path': None, 
-        'processing_complete': False, 
-        'output_videos': {},
-        'features_df': None, 
-        'gait_cycles': None, 
-        'pred_binary_results': None, 
-        'pred_multiclass_results': None,
-        'csv_features_df': None,
-        'uploaded_filename': None
+        'uploaded_video_path': None, 'processing_complete': False, 'output_videos': {},
+        'features_df': None, 'gait_cycles': None, 
+        'pred_binary_results': None, 'pred_multiclass_results': None,
+        'csv_features_df': None
     }
     
     for key, val in default_state.items():
-        if key not in st.session_state: 
-            st.session_state[key] = val
+        if key not in st.session_state: st.session_state[key] = val
 
-    # --- Sidebar ---
+    # Sidebar
     with st.sidebar:
         st.header("📋 System Status")
-        
-        def status_icon(path):
-            # Handle both Path objects and strings
-            p = Path(path) if not isinstance(path, Path) else path
-            if not p.exists():
-                # Optional: Check if it's a placeholder None or empty string
-                if str(p) == '.' or str(p) == '': return "⚪"
-            return "✅" if p.exists() else "❌"
-            
+        def status_icon(path): return "✅" if path.exists() else "❌"
         st.write(f"Config: {status_icon(CONFIG_PATH)}")
         st.write(f"MediaPipe: {status_icon(MEDIAPIPE_SCRIPT)}")
         st.write(f"Binary Model: {status_icon(BINARY_MODEL_PATH)}")
@@ -1974,49 +1895,11 @@ def main():
         st.write(f"Multi Model: {status_icon(MULTICLASS_MODEL_PATH)}")
         st.write(f"Multi Meta: {status_icon(MULTICLASS_METADATA_PATH)}")
         
-        st.markdown("---")
         if st.button("🔄 Reset App"):
-            # Clean up temp directory
-            temp = st.session_state.get('temp_dir')
-            if temp and temp.exists():
-                shutil.rmtree(temp)
-            
-            # Clear session state
             for key in list(st.session_state.keys()):
                 del st.session_state[key]
             st.rerun()
 
-    # --- Main Content: Upload Section ---
-    st.header("📤 1. Upload Video")
-    uploaded_file = st.file_uploader(
-        "Choose a video file (MP4, AVI, MOV)...", 
-        type=['mp4', 'avi', 'mov', 'mkv'], # Added mkv just in case
-        key="video_uploader"
-    )
-
-    # --- Real-Time Handling ---
-    # We check if the uploaded file name is different to avoid re-processing
-    current_filename = uploaded_file.name if uploaded_file else None
-    
-    if uploaded_file and current_filename != st.session_state.get('uploaded_filename'):
-        st.info("🔄 Processing upload...")
-        
-        # Use the VideoHandler we created in the previous step
-        processed_path = VideoHandler.handle_uploaded_file(
-            uploaded_file=uploaded_file,
-            converter_class=VideoConverter,
-            display_class=VideoDisplay
-        )
-        
-        if processed_path:
-            st.session_state.uploaded_video_path = processed_path
-            st.session_state.uploaded_filename = current_filename
-            # Reset downstream processing since new video uploaded
-            st.session_state.processing_complete = False
-            st.success("✅ Video Ready for Analysis")
-        else:
-            st.error("❌ Failed to process video.")
-            
     # Main Tabs
     t1, t2, t3, t4, t5, t6 = st.tabs(["📤 Upload", "⚙️ Process", "🎬 Videos", "📊 Features", "🔬 Analysis", "🤖 AI Modelling"])
 
