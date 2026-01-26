@@ -15,7 +15,7 @@ xgboost==1.7.3
 mediapipe==0.10.14
 
 # Computer Vision
-opencv-python==4.9.0.80
+# opencv-python==4.9.0.80
 pillow==10.4.0
 
 # Visualization & UI
@@ -28,3 +28,6 @@ plotly==5.22.0
 pyyaml==6.0.3
 requests==2.32.5
 tqdm==4.66.1
+
+imageio
+imageio-ffmpeg

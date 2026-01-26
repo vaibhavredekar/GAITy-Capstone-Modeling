@@ -115,6 +115,132 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, FEATURES_DIR, GAIT_CYCLES_DIR, MODELS_
 # CORE LOGIC CLASSES
 # ════════════════════════════════════════════════════════════════════════════
 
+# class VideoConverter:
+#     """Production-grade video converter with multiple fallback strategies"""
+    
+#     @staticmethod
+#     def check_ffmpeg() -> bool:
+#         """Check if FFmpeg is available"""
+#         try:
+#             subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)
+#             return True
+#         except (subprocess.SubprocessError, FileNotFoundError):
+#             return False
+    
+#     @staticmethod
+#     def get_video_codec(video_path: Path) -> Optional[str]:
+#         """Get codec information from video"""
+#         try:
+#             cap = cv2.VideoCapture(str(video_path))
+#             if not cap.isOpened(): return None
+#             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+#             cap.release()
+#             codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)])
+#             return codec.strip()
+#         except Exception as e:
+#             logger.error(f"Failed to get codec: {e}")
+#             return None
+    
+#     @staticmethod
+#     def is_web_compatible(codec: str) -> bool:
+#         """Check if codec is web browser compatible"""
+#         if not codec: return False
+#         return any(c in codec.upper() for c in ['AVC1', 'H264', 'X264'])
+    
+#     @staticmethod
+#     def convert_with_ffmpeg(input_path: Path, output_path: Path) -> bool:
+#         """Convert video using FFmpeg"""
+#         try:
+#             cmd = [
+#                 'ffmpeg', '-i', str(input_path),
+#                 '-c:v', 'libx264', '-preset', 'medium',
+#                 '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+#                 '-c:a', 'aac', '-b:a', '128k', '-y', str(output_path)
+#             ]
+#             result = subprocess.run(cmd, capture_output=True, timeout=300, text=True)
+            
+#             if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+#                 logger.info(f"FFmpeg conversion successful: {output_path.name}")
+#                 return True
+#             else:
+#                 logger.error(f"FFmpeg conversion failed: {result.stderr}")
+#                 return False
+#         except Exception as e:
+#             logger.error(f"FFmpeg error: {e}")
+#             return False
+    
+#     @staticmethod
+#     def convert_with_opencv(input_path: Path, output_path: Path) -> bool:
+#         """Fallback: Convert using OpenCV"""
+#         try:
+#             cap = cv2.VideoCapture(str(input_path))
+#             if not cap.isOpened():
+#                 return False
+            
+#             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+#             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+#             fps = cap.get(cv2.CAP_PROP_FPS)
+            
+#             # Codec options
+#             codec_options = [('avc1', 'H.264'), ('H264', 'H.264'), ('X264', 'X264'), ('mp4v', 'MPEG-4')]
+            
+#             for codec_str, codec_name in codec_options:
+#                 try:
+#                     fourcc = cv2.VideoWriter_fourcc(*codec_str)
+#                     out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+                    
+#                     if not out.isOpened():
+#                         continue
+                    
+#                     logger.info(f"Using {codec_name} for conversion")
+#                     while True:
+#                         ret, frame = cap.read()
+#                         if not ret:
+#                             break
+#                         out.write(frame)
+                    
+#                     cap.release()
+#                     out.release()
+                    
+#                     if output_path.exists() and output_path.stat().st_size > 0:
+#                         logger.info(f"OpenCV conversion successful with {codec_name}")
+#                         return True
+#                 except Exception:
+#                     continue
+            
+#             cap.release()
+#             return False
+#         except Exception as e:
+#             logger.error(f"OpenCV error: {e}")
+#             return False
+    
+#     @classmethod
+#     def ensure_web_compatible(cls, video_path: Path) -> Path:
+#         """Ensure video is web-compatible, convert if necessary"""
+#         if not video_path or not video_path.exists(): return video_path
+        
+#         web_path = video_path.parent / f"{video_path.stem}_h264.mp4"
+#         if web_path.exists() and web_path.stat().st_size > 0:
+#             logger.info(f"Using cached H.264: {web_path.name}")
+#             return web_path
+        
+#         codec = cls.get_video_codec(video_path)
+#         logger.info(f"Video codec: {codec}")
+        
+#         if cls.is_web_compatible(codec):
+#             logger.info(f"Already compatible: {video_path.name}")
+#             return video_path
+        
+#         logger.warning(f"Converting from {codec} to H.264")
+        
+#         if cls.check_ffmpeg():
+#             if cls.convert_with_ffmpeg(video_path, web_path): return web_path
+        
+#         if cls.convert_with_opencv(video_path, web_path): return web_path
+        
+#         logger.error(f"All conversions failed for {video_path.name}")
+#         return video_path
+
 class VideoConverter:
     """Production-grade video converter with multiple fallback strategies"""
     
@@ -168,50 +294,87 @@ class VideoConverter:
         except Exception as e:
             logger.error(f"FFmpeg error: {e}")
             return False
-    
+
     @staticmethod
-    def convert_with_opencv(input_path: Path, output_path: Path) -> bool:
-        """Fallback: Convert using OpenCV"""
+    def convert_with_imageio(input_path: Path, output_path: Path) -> bool:
+        """
+        Convert using imageio (uses bundled ffmpeg).
+        This is the recommended fallback for Streamlit Cloud.
+        """
         try:
+            reader = imageio.get_reader(str(input_path))
+            meta = reader.get_meta_data()
+            fps = meta.get('fps', 30.0)
+            
+            # Use libx264 for H.264 compatibility
+            writer = imageio.get_writer(
+                str(output_path), 
+                fps=fps, 
+                codec='libx264', 
+                quality=8, 
+                pix_fmt='yuv420p'
+            )
+            
+            for frame in reader:
+                writer.append_data(frame)
+            
+            writer.close()
+            reader.close()
+            
+            if output_path.exists() and output_path.stat().st_size > 0:
+                logger.info(f"ImageIO conversion successful: {output_path.name}")
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"ImageIO conversion error: {e}")
+            return False
+
+    @staticmethod
+    def convert_with_opencv_safe(input_path: Path, output_path: Path) -> bool:
+        """
+        Final fallback: Use OpenCV with MJPG codec.
+        Note: This creates an .avi file because OpenCV on Streamlit cannot encode MP4 H.264.
+        """
+        try:
+            # If we fall back to OpenCV safe, we force .avi extension to ensure file validity
+            if output_path.suffix == '.mp4':
+                output_path = output_path.with_suffix('.avi')
+            
             cap = cv2.VideoCapture(str(input_path))
             if not cap.isOpened():
                 return False
             
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS)
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
             
-            # Codec options
-            codec_options = [('avc1', 'H.264'), ('H264', 'H.264'), ('X264', 'X264'), ('mp4v', 'MPEG-4')]
+            # Use MJPG which is always available in OpenCV
+            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
+            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
             
-            for codec_str, codec_name in codec_options:
-                try:
-                    fourcc = cv2.VideoWriter_fourcc(*codec_str)
-                    out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-                    
-                    if not out.isOpened():
-                        continue
-                    
-                    logger.info(f"Using {codec_name} for conversion")
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
-                        out.write(frame)
-                    
-                    cap.release()
-                    out.release()
-                    
-                    if output_path.exists() and output_path.stat().st_size > 0:
-                        logger.info(f"OpenCV conversion successful with {codec_name}")
-                        return True
-                except Exception:
-                    continue
+            if not out.isOpened():
+                logger.error("OpenCV: VideoWriter failed to open")
+                cap.release()
+                return False
+            
+            logger.info(f"Using OpenCV MJPG fallback to create: {output_path.name}")
+            
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                out.write(frame)
             
             cap.release()
+            out.release()
+            
+            if output_path.exists() and output_path.stat().st_size > 0:
+                logger.info(f"OpenCV fallback successful: {output_path.name}")
+                return True
+                
             return False
         except Exception as e:
-            logger.error(f"OpenCV error: {e}")
+            logger.error(f"OpenCV fallback error: {e}")
             return False
     
     @classmethod
@@ -220,10 +383,8 @@ class VideoConverter:
         if not video_path or not video_path.exists(): return video_path
         
         web_path = video_path.parent / f"{video_path.stem}_h264.mp4"
-        if web_path.exists() and web_path.stat().st_size > 0:
-            logger.info(f"Using cached H.264: {web_path.name}")
-            return web_path
         
+        # 1. Check if already compatible
         codec = cls.get_video_codec(video_path)
         logger.info(f"Video codec: {codec}")
         
@@ -231,15 +392,32 @@ class VideoConverter:
             logger.info(f"Already compatible: {video_path.name}")
             return video_path
         
+        # 2. Check cached version
+        if web_path.exists() and web_path.stat().st_size > 0:
+            logger.info(f"Using cached H.264: {web_path.name}")
+            return web_path
+        
         logger.warning(f"Converting from {codec} to H.264")
         
+        # 3. Try System FFmpeg
         if cls.check_ffmpeg():
-            if cls.convert_with_ffmpeg(video_path, web_path): return web_path
+            if cls.convert_with_ffmpeg(video_path, web_path): 
+                return web_path
         
-        if cls.convert_with_opencv(video_path, web_path): return web_path
+        # 4. Try ImageIO (Primary Fix for Streamlit)
+        if cls.convert_with_imageio(video_path, web_path): 
+            return web_path
+        
+        # 5. Fallback to OpenCV Safe (MJPG/AVI)
+        # This might change the extension from .mp4 to .avi
+        avi_path = web_path.with_suffix('.avi')
+        if cls.convert_with_opencv_safe(video_path, avi_path): 
+            return avi_path
         
         logger.error(f"All conversions failed for {video_path.name}")
         return video_path
+
+
 
 class FileManager:
     """Production-grade file management"""
