@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - defaults
 dependencies:
-  - python=3.11
+  - python=3.11.3
   - pip=23.3
   # List of conda packages (try to use conda-forge for as many as possible)
   - numpy=1.23.5
