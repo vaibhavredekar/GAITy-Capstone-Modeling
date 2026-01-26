@@ -18,8 +18,6 @@ from functools import wraps
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-import imageio
-import tempfile
 
 # Environment configuration
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -117,196 +115,6 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, FEATURES_DIR, GAIT_CYCLES_DIR, MODELS_
 # CORE LOGIC CLASSES
 # ════════════════════════════════════════════════════════════════════════════
 
-# class VideoConverter:
-#     """Production-grade video converter with multiple fallback strategies"""
-    
-#     @staticmethod
-#     def check_ffmpeg() -> bool:
-#         """Check if FFmpeg is available"""
-#         try:
-#             subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5, check=True)
-#             return True
-#         except (subprocess.SubprocessError, FileNotFoundError):
-#             return False
-    
-#     @staticmethod
-#     def get_video_codec(video_path: Path) -> Optional[str]:
-#         """Get codec information from video"""
-#         try:
-#             cap = cv2.VideoCapture(str(video_path))
-#             if not cap.isOpened(): return None
-#             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-#             cap.release()
-#             codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)])
-#             return codec.strip()
-#         except Exception as e:
-#             logger.error(f"Failed to get codec: {e}")
-#             return None
-    
-#     @staticmethod
-#     def is_web_compatible(codec: str) -> bool:
-#         """Check if codec is web browser compatible"""
-#         if not codec: return False
-#         return any(c in codec.upper() for c in ['AVC1', 'H264', 'X264'])
-    
-#     @staticmethod
-#     def convert_with_ffmpeg(input_path: Path, output_path: Path) -> bool:
-#         """Convert video using FFmpeg"""
-#         try:
-#             cmd = [
-#                 'ffmpeg', '-i', str(input_path),
-#                 '-c:v', 'libx264', '-preset', 'medium',
-#                 '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
-#                 '-c:a', 'aac', '-b:a', '128k', '-y', str(output_path)
-#             ]
-#             result = subprocess.run(cmd, capture_output=True, timeout=300, text=True)
-            
-#             if result.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
-#                 logger.info(f"FFmpeg conversion successful: {output_path.name}")
-#                 return True
-#             else:
-#                 logger.error(f"FFmpeg conversion failed: {result.stderr}")
-#                 return False
-#         except Exception as e:
-#             logger.error(f"FFmpeg error: {e}")
-#             return False
-    
-#     @staticmethod
-#     def convert_with_opencv(input_path: Path, output_path: Path) -> bool:
-#         """Fallback: Convert using OpenCV"""
-#         try:
-#             cap = cv2.VideoCapture(str(input_path))
-#             if not cap.isOpened():
-#                 return False
-            
-#             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-#             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-#             fps = cap.get(cv2.CAP_PROP_FPS)
-            
-#             # Codec options
-#             codec_options = [('avc1', 'H.264'), ('H264', 'H.264'), ('X264', 'X264'), ('mp4v', 'MPEG-4')]
-            
-#             for codec_str, codec_name in codec_options:
-#                 try:
-#                     fourcc = cv2.VideoWriter_fourcc(*codec_str)
-#                     out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-                    
-#                     if not out.isOpened():
-#                         continue
-                    
-#                     logger.info(f"Using {codec_name} for conversion")
-#                     while True:
-#                         ret, frame = cap.read()
-#                         if not ret:
-#                             break
-#                         out.write(frame)
-                    
-#                     cap.release()
-#                     out.release()
-                    
-#                     if output_path.exists() and output_path.stat().st_size > 0:
-#                         logger.info(f"OpenCV conversion successful with {codec_name}")
-#                         return True
-#                 except Exception:
-#                     continue
-            
-#             cap.release()
-#             return False
-#         except Exception as e:
-#             logger.error(f"OpenCV error: {e}")
-#             return False
-    
-#     @classmethod
-#     def ensure_web_compatible(cls, video_path: Path) -> Path:
-#         """Ensure video is web-compatible, convert if necessary"""
-#         if not video_path or not video_path.exists(): return video_path
-        
-#         web_path = video_path.parent / f"{video_path.stem}_h264.mp4"
-#         if web_path.exists() and web_path.stat().st_size > 0:
-#             logger.info(f"Using cached H.264: {web_path.name}")
-#             return web_path
-        
-#         codec = cls.get_video_codec(video_path)
-#         logger.info(f"Video codec: {codec}")
-        
-#         if cls.is_web_compatible(codec):
-#             logger.info(f"Already compatible: {video_path.name}")
-#             return video_path
-        
-#         logger.warning(f"Converting from {codec} to H.264")
-        
-#         if cls.check_ffmpeg():
-#             if cls.convert_with_ffmpeg(video_path, web_path): return web_path
-        
-#         if cls.convert_with_opencv(video_path, web_path): return web_path
-        
-#         logger.error(f"All conversions failed for {video_path.name}")
-#         return video_path
-class VideoHandler:
-    """
-    Handles real-time video ingestion, conversion, and display.
-    Ensures any uploaded video is converted to stream-compatible MP4 instantly.
-    """
-    
-    @staticmethod
-    def get_temp_dir() -> Path:
-        """Creates and returns a persistent temporary directory for the session"""
-        # Use a session-specific temp dir to avoid conflicts
-        if "temp_dir" not in st.session_state:
-            st.session_state.temp_dir = Path(tempfile.mkdtemp())
-        return st.session_state.temp_dir
-
-    @staticmethod
-    def handle_uploaded_file(
-        uploaded_file, 
-        converter_class,
-        display_class
-    ) -> Optional[Path]:
-        """
-        Takes a Streamlit UploadedFile, saves it, converts it to H.264,
-        and displays it immediately.
-        
-        Returns the Path to the converted video for further processing.
-        """
-        if uploaded_file is None:
-            return None
-
-        try:
-            # 1. Initialize Temp Storage
-            temp_dir = VideoHandler.get_temp_dir()
-            
-            # Define paths
-            original_path = temp_dir / uploaded_file.name
-            converted_path = temp_dir / f"{uploaded_file.stem}_converted.mp4"
-
-            # 2. Save the uploaded file to disk immediately
-            with open(original_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-            
-            # 3. Run "Real-time" Conversion
-            # We use a spinner to block UI until the video is ready for streaming
-            with st.spinner("🔄 Converting video to streamable format (H.264)..."):
-                # Call your existing VideoConverter logic
-                converted_video = converter_class.ensure_web_compatible(original_path)
-            
-            # 4. Display the Result Immediately
-            if converted_video and converted_video.exists():
-                display_class.display_video_with_download(
-                    video_path=converted_video, 
-                    label="Uploaded Video (Stream-Ready)", 
-                    key_suffix="upload_display"
-                )
-                return converted_video
-            else:
-                st.error("❌ Failed to convert video for streaming.")
-                return None
-
-        except Exception as e:
-            st.error(f"❌ Error processing upload: {str(e)}")
-            logger.exception("Upload processing failed")
-            return None
-
-
 class VideoConverter:
     """Production-grade video converter with multiple fallback strategies"""
     
@@ -360,87 +168,50 @@ class VideoConverter:
         except Exception as e:
             logger.error(f"FFmpeg error: {e}")
             return False
-
+    
     @staticmethod
-    def convert_with_imageio(input_path: Path, output_path: Path) -> bool:
-        """
-        Convert using imageio (uses bundled ffmpeg).
-        This is the recommended fallback for Streamlit Cloud.
-        """
+    def convert_with_opencv(input_path: Path, output_path: Path) -> bool:
+        """Fallback: Convert using OpenCV"""
         try:
-            reader = imageio.get_reader(str(input_path))
-            meta = reader.get_meta_data()
-            fps = meta.get('fps', 30.0)
-            
-            # Use libx264 for H.264 compatibility
-            writer = imageio.get_writer(
-                str(output_path), 
-                fps=fps, 
-                codec='libx264', 
-                quality=8, 
-                pix_fmt='yuv420p'
-            )
-            
-            for frame in reader:
-                writer.append_data(frame)
-            
-            writer.close()
-            reader.close()
-            
-            if output_path.exists() and output_path.stat().st_size > 0:
-                logger.info(f"ImageIO conversion successful: {output_path.name}")
-                return True
-            return False
-        except Exception as e:
-            logger.error(f"ImageIO conversion error: {e}")
-            return False
-
-    @staticmethod
-    def convert_with_opencv_safe(input_path: Path, output_path: Path) -> bool:
-        """
-        Final fallback: Use OpenCV with MJPG codec.
-        Note: This creates an .avi file because OpenCV on Streamlit cannot encode MP4 H.264.
-        """
-        try:
-            # If we fall back to OpenCV safe, we force .avi extension to ensure file validity
-            if output_path.suffix == '.mp4':
-                output_path = output_path.with_suffix('.avi')
-            
             cap = cv2.VideoCapture(str(input_path))
             if not cap.isOpened():
                 return False
             
             width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            fps = cap.get(cv2.CAP_PROP_FPS)
             
-            # Use MJPG which is always available in OpenCV
-            fourcc = cv2.VideoWriter_fourcc(*'MJPG')
-            out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+            # Codec options
+            codec_options = [('avc1', 'H.264'), ('H264', 'H.264'), ('X264', 'X264'), ('mp4v', 'MPEG-4')]
             
-            if not out.isOpened():
-                logger.error("OpenCV: VideoWriter failed to open")
-                cap.release()
-                return False
-            
-            logger.info(f"Using OpenCV MJPG fallback to create: {output_path.name}")
-            
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                out.write(frame)
+            for codec_str, codec_name in codec_options:
+                try:
+                    fourcc = cv2.VideoWriter_fourcc(*codec_str)
+                    out = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+                    
+                    if not out.isOpened():
+                        continue
+                    
+                    logger.info(f"Using {codec_name} for conversion")
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                        out.write(frame)
+                    
+                    cap.release()
+                    out.release()
+                    
+                    if output_path.exists() and output_path.stat().st_size > 0:
+                        logger.info(f"OpenCV conversion successful with {codec_name}")
+                        return True
+                except Exception:
+                    continue
             
             cap.release()
-            out.release()
-            
-            if output_path.exists() and output_path.stat().st_size > 0:
-                logger.info(f"OpenCV fallback successful: {output_path.name}")
-                return True
-                
             return False
         except Exception as e:
-            logger.error(f"OpenCV fallback error: {e}")
+            logger.error(f"OpenCV error: {e}")
             return False
     
     @classmethod
@@ -449,8 +220,10 @@ class VideoConverter:
         if not video_path or not video_path.exists(): return video_path
         
         web_path = video_path.parent / f"{video_path.stem}_h264.mp4"
+        if web_path.exists() and web_path.stat().st_size > 0:
+            logger.info(f"Using cached H.264: {web_path.name}")
+            return web_path
         
-        # 1. Check if already compatible
         codec = cls.get_video_codec(video_path)
         logger.info(f"Video codec: {codec}")
         
@@ -458,31 +231,15 @@ class VideoConverter:
             logger.info(f"Already compatible: {video_path.name}")
             return video_path
         
-        # 2. Check cached version
-        if web_path.exists() and web_path.stat().st_size > 0:
-            logger.info(f"Using cached H.264: {web_path.name}")
-            return web_path
-        
         logger.warning(f"Converting from {codec} to H.264")
         
-        # 3. Try System FFmpeg
         if cls.check_ffmpeg():
-            if cls.convert_with_ffmpeg(video_path, web_path): 
-                return web_path
+            if cls.convert_with_ffmpeg(video_path, web_path): return web_path
         
-        # 4. Try ImageIO (Primary Fix for Streamlit)
-        if cls.convert_with_imageio(video_path, web_path): 
-            return web_path
-        
-        # 5. Fallback to OpenCV Safe (MJPG/AVI)
-        # This might change the extension from .mp4 to .avi
-        avi_path = web_path.with_suffix('.avi')
-        if cls.convert_with_opencv_safe(video_path, avi_path): 
-            return avi_path
+        if cls.convert_with_opencv(video_path, web_path): return web_path
         
         logger.error(f"All conversions failed for {video_path.name}")
         return video_path
-
 
 class FileManager:
     """Production-grade file management"""
@@ -699,201 +456,75 @@ class PipelineManager:
             logger.error(f"Pipeline failed: {e}")
             return None
 
-# class VideoDisplay:
-    
-#     @staticmethod
-#     def get_video_info(video_path: Path) -> Optional[dict]:
-#         try:
-#             cap = cv2.VideoCapture(str(video_path))
-#             fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
-#             codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)]).strip()
-            
-#             info = {
-#                 'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
-#                 'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
-#                 'fps': cap.get(cv2.CAP_PROP_FPS) or 30,
-#                 'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
-#                 'duration': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 30),
-#                 'size_mb': video_path.stat().st_size / (1024 * 1024),
-#                 'codec': codec
-#             }
-#             cap.release()
-#             return info
-#         except Exception as e:
-#             return None
-    
-#     @staticmethod
-#     def display_video_with_download(video_path: Optional[Path], label: str, key_suffix: str) -> None:
-#         st.markdown(f"**{label}**")
-        
-#         if not video_path or not video_path.exists():
-#             st.warning("⚠️ Video not found")
-#             return
-        
-#         try:
-#             web_video = VideoConverter.ensure_web_compatible(video_path)
-            
-#             with open(web_video, 'rb') as video_file:
-#                 video_bytes = video_file.read()
-#                 st.video(video_bytes)
-            
-#             col1, col2 = st.columns([3, 1])
-            
-#             with col1:
-#                 info = VideoDisplay.get_video_info(web_video)
-#                 if info:
-#                     codec_status = "✅" if VideoConverter.is_web_compatible(info['codec']) else "⚠️"
-#                     st.caption(f"📊 {info['width']}×{info['height']} | {info['fps']:.0f} FPS | {info['duration']:.1f}s | {info['size_mb']:.1f} MB | {codec_status} {info['codec']}")
-            
-#             with col2:
-#                 file_data_key = f"data_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
-#                 widget_key = f"widget_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
-                
-#                 if file_data_key not in st.session_state:
-#                     try:
-#                         with open(web_video, 'rb') as f:
-#                             st.session_state[file_data_key] = f.read()
-#                     except Exception:
-#                         st.session_state[file_data_key] = None
-                
-#                 if st.session_state[file_data_key]:
-#                     st.download_button(
-#                         "📥 Download",
-#                         data=st.session_state[file_data_key],
-#                         file_name=web_video.name,
-#                         mime="video/mp4",
-#                         key=widget_key,
-#                         use_container_width=True
-#                     )
-        
-#         except Exception as e:
-#             st.error(f"❌ Display error: {str(e)}")
-
-
 class VideoDisplay:
     
     @staticmethod
     def get_video_info(video_path: Path) -> Optional[dict]:
-        """
-        Extract video metadata using imageio (via ffmpeg backend).
-        This is more reliable than cv2 for container-level data.
-        """
-        reader = None
         try:
-            if not video_path.exists():
-                return None
-
-            # imageio uses ffmpeg to probe the file
-            reader = imageio.get_reader(str(video_path))
-            meta = reader.get_meta_data()
+            cap = cv2.VideoCapture(str(video_path))
+            fourcc = int(cap.get(cv2.CAP_PROP_FOURCC))
+            codec = "".join([chr((int(fourcc) >> 8 * i) & 0xFF) for i in range(4)]).strip()
             
-            fps = meta.get('fps', 30.0) # Default to 30 if missing
-            # Calculate duration: frames / fps
-            frame_count = reader.count_frames()
-            duration = frame_count / fps if fps > 0 else 0
-            
-            # Get dimensions from meta or first frame
-            size = meta.get('size', None)
-            if size:
-                width, height = size
-            else:
-                # Fallback: try reading the first frame
-                try:
-                    frame = reader.get_data(0)
-                    height, width = frame.shape[:2]
-                except Exception:
-                    width, height = 0, 0
-
-            # Get file size
-            size_mb = video_path.stat().st_size / (1024 * 1024)
-            
-            # Try to get codec from metadata (often 'h264', 'mpeg4', 'avc1')
-            codec = meta.get('codec', 'unknown')
-
-            return {
-                'width': width,
-                'height': height,
-                'fps': fps,
-                'frames': frame_count,
-                'duration': duration,
-                'size_mb': size_mb,
+            info = {
+                'width': int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)),
+                'height': int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)),
+                'fps': cap.get(cv2.CAP_PROP_FPS) or 30,
+                'frames': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)),
+                'duration': int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) / (cap.get(cv2.CAP_PROP_FPS) or 30),
+                'size_mb': video_path.stat().st_size / (1024 * 1024),
                 'codec': codec
             }
+            cap.release()
+            return info
         except Exception as e:
-            logger.error(f"Exception in get_video_info (imageio): {e}")
             return None
-        finally:
-            if reader is not None:
-                reader.close()
-
+    
     @staticmethod
     def display_video_with_download(video_path: Optional[Path], label: str, key_suffix: str) -> None:
-        """
-        Displays video and provides download button.
-        Uses imageio for metadata, streams file for display/download.
-        """
         st.markdown(f"**{label}**")
         
         if not video_path or not video_path.exists():
-            st.warning("⚠️ Video file not found")
+            st.warning("⚠️ Video not found")
             return
         
         try:
-            # 1. Ensure compatibility (Uses VideoConverter which uses imageio/opencv fallbacks)
             web_video = VideoConverter.ensure_web_compatible(video_path)
             
-            if not web_video.exists():
-                st.error("❌ Converted video file is missing.")
-                return
-
-            # 2. Display Video (Pass raw string path for streaming)
-            st.video(str(web_video))
+            with open(web_video, 'rb') as video_file:
+                video_bytes = video_file.read()
+                st.video(video_bytes)
             
-            # 3. Layout
-            col_info, col_download = st.columns([3, 1])
+            col1, col2 = st.columns([3, 1])
             
-            with col_info:
+            with col1:
                 info = VideoDisplay.get_video_info(web_video)
                 if info:
-                    # Check codec compatibility status
-                    is_compat = VideoConverter.is_web_compatible(info['codec'])
-                    codec_status = "✅" if is_compat else "⚠️"
-                    
-                    ext_str = web_video.suffix.upper().replace('.', '')
-                    
-                    st.caption(
-                        f"📊 {info['width']}×{info['height']} | "
-                        f"{info['fps']:.0f} FPS | "
-                        f"{info['duration']:.1f}s | "
-                        f"{info['size_mb']:.1f} MB | "
-                        f"{codec_status} {info['codec']} ({ext_str})"
-                    )
-                else:
-                    st.caption("ℹ️ Metadata unavailable")
-
-            with col_download:
-                # 4. Download Button
-                # Determine correct MIME type based on extension
-                if web_video.suffix.lower() == '.avi':
-                    mime_type = "video/x-msvideo"
-                elif web_video.suffix.lower() == '.mov':
-                    mime_type = "video/quicktime"
-                else:
-                    mime_type = "video/mp4"
+                    codec_status = "✅" if VideoConverter.is_web_compatible(info['codec']) else "⚠️"
+                    st.caption(f"📊 {info['width']}×{info['height']} | {info['fps']:.0f} FPS | {info['duration']:.1f}s | {info['size_mb']:.1f} MB | {codec_status} {info['codec']}")
+            
+            with col2:
+                file_data_key = f"data_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
+                widget_key = f"widget_{key_suffix}_{web_video.stem}_{web_video.stat().st_mtime}"
                 
-                # Pass an open file pointer for efficient streaming
-                st.download_button(
-                    label="📥 Download",
-                    data=open(web_video, 'rb'),
-                    file_name=web_video.name,
-                    mime=mime_type,
-                    key=f"dl_{key_suffix}",
-                    use_container_width=True
-                )
-
+                if file_data_key not in st.session_state:
+                    try:
+                        with open(web_video, 'rb') as f:
+                            st.session_state[file_data_key] = f.read()
+                    except Exception:
+                        st.session_state[file_data_key] = None
+                
+                if st.session_state[file_data_key]:
+                    st.download_button(
+                        "📥 Download",
+                        data=st.session_state[file_data_key],
+                        file_name=web_video.name,
+                        mime="video/mp4",
+                        key=widget_key,
+                        use_container_width=True
+                    )
+        
         except Exception as e:
-            st.error(f"❌ Error displaying video: {str(e)}")
-            logger.exception("VideoDisplay error")
+            st.error(f"❌ Display error: {str(e)}")
 
 class ExportManager:
     
@@ -1866,7 +1497,7 @@ def main():
     h1, h2, h3 { color: #1F2937; font-family: 'Segoe UI', sans-serif; font-weight: 600; }
     </style>""", unsafe_allow_html=True)
     
-    st.title("🚶 Production-Grade Gait Analysis & AI Modelling")
+    st.title("🚶 Gait Analysis & AI Modelling")
     st.markdown("**Complete Pipeline: Processing, Feature Engineering, Analysis & Prediction**")
     st.markdown("---")
     
@@ -2220,7 +1851,7 @@ def main():
                 with st.expander("View Detailed Probability Breakdown"):
                     st.dataframe(res_df[display_cols])
         # ════════════════════════════════════════════════════════════════════════════════════════
-    
+
                     
 if __name__ == "__main__":
     main()
