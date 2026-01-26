@@ -1,11 +1,12 @@
-# #!/usr/bin/env python3
-# """
-# MEDIAPIPE POSE DETECTION & MODELLING PIPELINE - PRODUCTION GRADE (ALL-IN-ONE)
-# Includes: Processing, Feature Engineering, Visualization, and AI Modelling.
-# """
+#--------------- Multi-class slightly better improvements ------------##
+
+#!/usr/bin/env python3
+"""
+MEDIAPIPE POSE DETECTION & MODELLING PIPELINE - PRODUCTION GRADE (ALL-IN-ONE)
+Includes: Processing, Feature Engineering, Visualization, and AI Modelling.
+"""
 
 import os
-import pickle
 import sys
 import warnings
 import logging
@@ -45,15 +46,16 @@ from scipy.ndimage import gaussian_filter1d
 from matplotlib.patches import Polygon, Patch, Circle
 from mpl_toolkits.mplot3d import Axes3D
 
-# ═══════════════════════════════════════════════════════════════════════════
-# LOGGING & DECORATORS
 # ═════════════════════════════════════════════════════════════════════════════
+# LOGGING & DECORATORS
+# ═════════════════════════════════════════════════════════════════════════════════
 
 def setup_logging():
     """Configure intensive logging for application."""
+    # Force UTF-8 encoding for logs to handle special characters on Windows
+    # If this still fails on Windows CMD, the code below handles encoding errors gracefully
     try:
         log_file = Path("gait_app.log")
-        # Force UTF-8 encoding for logs to handle special characters on Windows
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -87,9 +89,9 @@ def log_execution(func: Callable) -> Callable:
             raise e
     return wrapper
 
-# ═══════════════════════════════════════════════════════════════════════════
-# CONFIGURATION & PATHS
 # ═════════════════════════════════════════════════════════════════════════════
+# CONFIGURATION & PATHS
+# ═══════════════════════════════════════════════════════════════════════════════
 
 PROJECT_ROOT = Path(__file__).parent.absolute()
 CONFIG_PATH = PROJECT_ROOT / "config.json"
@@ -111,9 +113,9 @@ MULTICLASS_METADATA_PATH = MODELS_DIR / "xgboost_gait_5class_metadata.json"
 for directory in [UPLOAD_DIR, OUTPUT_DIR, FEATURES_DIR, GAIT_CYCLES_DIR, MODELS_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-# ════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════════
 # CORE LOGIC CLASSES
-# ════════════════════════════════════════════════════════════════════════════
+# ══════════════════════════════════════════════════════════════════════════════════
 
 class VideoConverter:
     """Production-grade video converter with multiple fallback strategies"""
@@ -554,9 +556,10 @@ class ExportManager:
             logger.error(f"ZIP failed: {e}")
             return None
 
-# ══════════════════════════════════════════════════════════════════════
-# MODEL PREDICTOR (FIXED FOR STABILITY & ATTRIBUTES)
-# ════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# MODEL PREDICTOR (FIXED ENCODING & CLASS MISMATCH)
+# ═══════════════════════════════════════════════════════════════════════════════
+
 class ModelPredictor:
     """Handles loading and predicting with XGBoost models."""
     
@@ -564,324 +567,121 @@ class ModelPredictor:
         self.binary_model = None
         self.multiclass_model = None
         self.binary_features = None
-        self.multiclass_metadata = None  # Fixed typo: was multimedia_metadata
+        self.multiclass_metadata = None
         self.multiclass_classes = []
-        self.binary_classes = ["Normal", "Abnormal"]
         
-    def load_binary_model(self) -> bool:
-        """Load binary model with proper attribute initialization"""
+    def load_binary_model(self):
         if not BINARY_MODEL_PATH.exists() or not BINARY_FEATURES_PATH.exists():
             raise FileNotFoundError("Binary model or metadata files missing.")
-        
         try:
-            # METHOD 1: Try loading with pickle first (preserves all attributes)
-            if os.path.exists(BINARY_MODEL_PATH.with_suffix('.pkl')):
-                with open(BINARY_MODEL_PATH.with_suffix('.pkl'), 'rb') as f:
-                    self.binary_model = pickle.load(f)
-                logger.info("Binary model loaded via pickle")
-            else:
-                # METHOD 2: Use XGBoost's load_model and manually set attributes
-                self.binary_model = xgb.XGBClassifier()
-                
-                # Load the booster
-                booster = xgb.Booster()
-                booster.load_model(str(BINARY_MODEL_PATH))
-                
-                # Set the booster and necessary attributes
-                self.binary_model._Booster = booster
-                
-                # Manually set required attributes for scikit-learn compatibility
-                self.binary_model.n_classes_ = 2
-                self.binary_model.classes_ = np.array([0, 1])
-                
-                logger.info("Binary model loaded via XGBoost booster")
-            
-            # Load feature names
+            self.binary_model = xgb.XGBClassifier()
+            self.binary_model.load_model(BINARY_MODEL_PATH)
             with open(BINARY_FEATURES_PATH, 'r') as f: 
                 self.binary_features = json.load(f)
-            
-            logger.info(f"Binary model loaded with {len(self.binary_features)} features")
+            logger.info("Binary model loaded")
             return True
-            
         except Exception as e:
             logger.error(f"Failed to load binary model: {e}")
             raise e
 
-    def load_multiclass_model(self) -> bool:
-        """Load multiclass model with proper attribute initialization"""
+    def load_multiclass_model(self):
         if not MULTICLASS_MODEL_PATH.exists() or not MULTICLASS_METADATA_PATH.exists():
             raise FileNotFoundError("Multiclass model or metadata files missing.")
-        
         try:
-            # METHOD 1: Try loading with pickle first
-            pickle_path = MULTICLASS_MODEL_PATH.with_suffix('.pkl')
-            if os.path.exists(pickle_path):
-                with open(pickle_path, 'rb') as f:
-                    self.multiclass_model = pickle.load(f)
-                logger.info("Multiclass model loaded via pickle")
-            else:
-                # METHOD 2: Use XGBoost's load_model
-                self.multiclass_model = xgb.XGBClassifier()
-                
-                # Load the booster
-                booster = xgb.Booster()
-                booster.load_model(str(MULTICLASS_MODEL_PATH))
-                
-                # Set the booster
-                self.multiclass_model._Booster = booster
-                logger.info("Multiclass model loaded via XGBoost booster")
-            
-            # Load metadata
+            self.multiclass_model = xgb.XGBClassifier()
+            self.multiclass_model.load_model(MULTICLASS_MODEL_PATH)
             with open(MULTICLASS_METADATA_PATH, 'r') as f: 
                 self.multiclass_metadata = json.load(f)
-            
-            # Extract class information
             id_to_class = self.multiclass_metadata.get("id_to_class", {})
-            
-            # Convert keys to int and sort
-            id_to_class_int = {int(k): v for k, v in id_to_class.items()}
-            sorted_ids = sorted(id_to_class_int.keys())
-            
-            self.multiclass_classes = [id_to_class_int[i] for i in sorted_ids]
-            
-            # Set scikit-learn compatible attributes
-            self.multiclass_model.n_classes_ = len(self.multiclass_classes)
-            self.multiclass_model.classes_ = np.array(sorted_ids)
-            
-            logger.info(f"Multiclass model loaded. {len(self.multiclass_classes)} classes: {self.multiclass_classes}")
+            # Initialize class list from metadata
+            self.multiclass_classes = [id_to_class[str(i)] for i in sorted(id_to_class.keys())]
+            logger.info(f"Multiclass model loaded. Metadata claims {len(self.multiclass_classes)} classes.")
             return True
-            
         except Exception as e:
             logger.error(f"Failed to load multiclass model: {e}")
             raise e
 
-    def _validate_model_attributes(self, model, model_type: str) -> bool:
-        """Validate that a model has all required attributes"""
-        required_attrs = ['_Booster', 'n_classes_', 'classes_']
-        
-        for attr in required_attrs:
-            if not hasattr(model, attr):
-                logger.warning(f"{model_type} model missing attribute: {attr}")
-                
-                if attr == 'n_classes_':
-                    # Try to infer n_classes from classes_ or booster
-                    if hasattr(model, 'classes_'):
-                        model.n_classes_ = len(model.classes_)
-                    elif model_type == 'binary':
-                        model.n_classes_ = 2
-                    else:
-                        # For multiclass, we need to check metadata
-                        if self.multiclass_classes:
-                            model.n_classes_ = len(self.multiclass_classes)
-                        else:
-                            return False
-                
-                elif attr == 'classes_':
-                    if model_type == 'binary':
-                        model.classes_ = np.array([0, 1])
-                    elif model_type == 'multiclass' and self.multiclass_classes:
-                        model.classes_ = np.array(range(len(self.multiclass_classes)))
-                    else:
-                        return False
-        
-        # Verify booster is valid
-        if hasattr(model, '_Booster') and model._Booster is None:
-            logger.error(f"{model_type} model booster is None")
-            return False
-        
-        return True
-
     def align_features(self, df: pd.DataFrame, required_features: List[str]) -> pd.DataFrame:
         """Aligns dataframe columns to match model requirements, filling missing with 0."""
-        # Create a copy to avoid modifying original
-        df_aligned = df.copy()
-        
-        # Add missing features with 0
-        missing = set(required_features) - set(df_aligned.columns)
+        missing = set(required_features) - set(df.columns)
         if missing:
-            logger.warning(f"Adding {len(missing)} missing features with 0.0")
-            for m in missing:
-                df_aligned[m] = 0.0
-        
-        # Ensure correct order
-        df_aligned = df_aligned[required_features]
-        
-        return df_aligned
+            # Safe log message (no emojis)
+            logger.warning(f"Adding {len(missing)} missing features with 0.0: {list(missing)[:5]}...")
+            for m in missing: df[m] = 0.0
+        return df[required_features]
 
-    def predict_binary(self, df_features: pd.DataFrame) -> pd.DataFrame:
-        """Predict binary classification (Normal vs Abnormal)"""
-        if not self.binary_model:
-            raise ValueError("Binary model not loaded.")
+    def predict_binary(self, df_features: pd.DataFrame):
+        if not self.binary_model: raise ValueError("Binary model not loaded.")
         
-        # Validate model attributes
-        if not self._validate_model_attributes(self.binary_model, 'binary'):
-            raise ValueError("Binary model is in invalid state")
-        
-        # Align features
         df_aligned = self.align_features(df_features.copy(), self.binary_features)
-        
-        # Handle missing values
         df_filled = df_aligned.fillna(df_aligned.median())
         
-        try:
-            # Get predictions
-            probs = self.binary_model.predict_proba(df_filled)
-            preds = self.binary_model.predict(df_filled)
-            
-            # Map predictions to labels
-            labels = ["Normal" if p == 0 else "Abnormal" for p in preds]
-            confidences = [max(p) for p in probs]
-            
-            # Create results DataFrame
-            details_df = df_features.copy()
-            details_df['prediction'] = labels
-            details_df['confidence'] = confidences
-            
-            # Add probability columns
-            if probs.shape[1] >= 2:
-                details_df['prob_normal'] = probs[:, 0]
-                details_df['prob_abnormal'] = probs[:, 1]
-            else:
-                # Fallback for binary with single probability column
-                details_df['prob_normal'] = 1 - probs[:, 0]
-                details_df['prob_abnormal'] = probs[:, 0]
-            
-            return details_df
-            
-        except Exception as e:
-            logger.error(f"Binary prediction failed: {e}")
-            raise e
+        probs = self.binary_model.predict_proba(df_filled)
+        preds = self.binary_model.predict(df_filled)
+        
+        labels = ["Normal" if p == 0 else "Abnormal" for p in preds]
+        confidences = [max(p) for p in probs]
+        
+        details_df = df_features.copy()
+        details_df['prediction'] = labels
+        details_df['confidence'] = confidences
+        details_df['prob_normal'] = probs[:, 0]
+        details_df['prob_abnormal'] = probs[:, 1]
+        return details_df
 
-    def predict_multiclass(self, df_features: pd.DataFrame) -> pd.DataFrame:
-        """Predict multiclass classification"""
-        if not self.multiclass_model:
-            raise ValueError("Multiclass model not loaded.")
-        
-        # Validate model attributes
-        if not self._validate_model_attributes(self.multiclass_model, 'multiclass'):
-            raise ValueError("Multiclass model is in invalid state")
-        
-        # Get required features from metadata
+    def predict_multiclass(self, df_features: pd.DataFrame):
+        if not self.multiclass_model: raise ValueError("Multiclass model not loaded.")
+            
         required_features = self.multiclass_metadata.get("feature_cols", [])
-        
-        # Align features
         df_aligned = self.align_features(df_features.copy(), required_features)
-        
-        # Handle missing values
         df_filled = df_aligned.fillna(df_aligned.median())
         
-        try:
-            # Get predictions
-            probs = self.multiclass_model.predict_proba(df_filled)
-            preds = self.multiclass_model.predict(df_filled)
+        probs = self.multiclass_model.predict_proba(df_filled)
+        preds = self.multiclass_model.predict(df_filled)
+        
+        # --- FIX FOR INDEX ERROR & ENCODING ---
+        # Detect the actual number of classes output by the model
+        actual_n_classes = probs.shape[1]
+        expected_n_classes = len(self.multiclass_classes)
+        
+        if actual_n_classes != expected_n_classes:
+            # CRITICAL FIX: Do NOT use emojis in logger.warning() to avoid Windows UnicodeEncodeError
+            # Use ASCII characters for logs, Emojis only for Streamlit UI
+            log_msg = f"Model Mismatch: Model output contains {actual_n_classes} classes, but metadata lists {expected_n_classes}. Adjusting to {actual_n_classes}."
+            ui_msg = f"⚠️ **Model Mismatch**: Model output contains {actual_n_classes} classes, but metadata lists {expected_n_classes}. Adjusting to {actual_n_classes}."
             
-            # Get actual number of classes from probability matrix
-            actual_n_classes = probs.shape[1]
+            logger.warning(log_msg)
+            st.warning(ui_msg)
             
-            # Check if metadata matches model output
-            if len(self.multiclass_classes) != actual_n_classes:
-                logger.warning(
-                    f"Model output has {actual_n_classes} classes, "
-                    f"but metadata lists {len(self.multiclass_classes)}. "
-                    "Using model output shape."
-                )
-                
-                # Adjust class list if possible
-                if actual_n_classes <= len(self.multiclass_classes):
-                    self.multiclass_classes = self.multiclass_classes[:actual_n_classes]
-                else:
-                    # Need to extend class list
-                    for i in range(len(self.multiclass_classes), actual_n_classes):
-                        self.multiclass_classes.append(f"Class_{i}")
-            
-            # Map predictions to class names
-            labels = []
-            confidences = []
-            
-            for i, pred_idx in enumerate(preds):
-                if 0 <= pred_idx < len(self.multiclass_classes):
-                    labels.append(self.multiclass_classes[pred_idx])
-                    confidences.append(probs[i, pred_idx])
-                else:
-                    logger.warning(f"Invalid prediction index {pred_idx}, using 'Unknown'")
-                    labels.append("Unknown")
-                    confidences.append(0.0)
-            
-            # Create results DataFrame
-            details_df = df_features.copy()
-            details_df['prediction'] = labels
-            details_df['confidence'] = confidences
-            
-            # Add probability columns for each class
-            for class_idx in range(actual_n_classes):
-                if class_idx < len(self.multiclass_classes):
-                    class_name = self.multiclass_classes[class_idx]
-                else:
-                    class_name = f"Class_{class_idx}"
-                
-                details_df[f'prob_{class_name}'] = probs[:, class_idx]
-            
-            return details_df
-            
-        except Exception as e:
-            logger.error(f"Multiclass prediction failed: {e}")
-            
-            # Try alternative prediction method
-            logger.info("Attempting alternative prediction method...")
-            return self._predict_multiclass_fallback(df_filled, df_features)
-
-    def _predict_multiclass_fallback(self, df_filled: pd.DataFrame, original_df: pd.DataFrame) -> pd.DataFrame:
-        """Fallback prediction using booster directly"""
-        try:
-            # Use booster directly
-            booster = self.multiclass_model.get_booster()
-            dmatrix = xgb.DMatrix(df_filled)
-            
-            # Get raw predictions (probabilities)
-            raw_preds = booster.predict(dmatrix, output_margin=False)
-            
-            # Reshape if needed
-            if raw_preds.ndim == 1:
-                # Binary classification format
-                probs = np.column_stack([1 - raw_preds, raw_preds])
+            # Slice the class list to match the model's actual output
+            self.multiclass_classes = self.multiclass_classes[:actual_n_classes]
+        
+        labels = []
+        confidences = []
+        
+        # Map predictions safely
+        for i, p in enumerate(preds):
+            if p < len(self.multiclass_classes):
+                labels.append(self.multiclass_classes[p])
+                confidences.append(probs[i, p])
             else:
-                # Multiclass
-                probs = raw_preds
+                labels.append("Unknown")
+                confidences.append(0.0)
+        
+        details_df = df_features.copy()
+        details_df['prediction'] = labels
+        details_df['confidence'] = confidences
+        
+        # Add probability columns dynamically based on actual output
+        for i in range(actual_n_classes):
+            cls_name = self.multiclass_classes[i] if i < len(self.multiclass_classes) else f"Class_{i}"
+            details_df[f'prob_{cls_name}'] = probs[:, i]
             
-            # Get predictions
-            preds = np.argmax(probs, axis=1)
-            actual_n_classes = probs.shape[1]
-            
-            # Ensure we have class names
-            if len(self.multiclass_classes) != actual_n_classes:
-                self.multiclass_classes = [f"Class_{i}" for i in range(actual_n_classes)]
-            
-            # Map predictions
-            labels = [self.multiclass_classes[p] if p < len(self.multiclass_classes) else "Unknown" 
-                     for p in preds]
-            confidences = np.max(probs, axis=1)
-            
-            # Create results DataFrame
-            details_df = original_df.copy()
-            details_df['prediction'] = labels
-            details_df['confidence'] = confidences
-            
-            # Add probability columns
-            for class_idx in range(actual_n_classes):
-                class_name = self.multiclass_classes[class_idx] if class_idx < len(self.multiclass_classes) else f"Class_{class_idx}"
-                details_df[f'prob_{class_name}'] = probs[:, class_idx]
-            
-            logger.info("Fallback prediction successful")
-            return details_df
-            
-        except Exception as fallback_error:
-            logger.error(f"Fallback prediction also failed: {fallback_error}")
-            raise fallback_error
+        return details_df
 
-
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # GAIT ANALYSIS ENGINE
-# ══════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 class GaitAnalysisEngine:
     """Complete gait analysis engine"""
@@ -1039,7 +839,6 @@ class GaitAnalysisEngine:
         
         ankle_z = window[:, L_ANKLE, 2]
         qc["ankle_z_range"] = ankle_z.max() - ankle_z.min()
-        qc["ankle_z_spike"] = np.max(np.abs(np.diff(ankle_z)))
         qc["flag_flat_depth"] = qc["ankle_z_range"] < 0.05
         
         qc["qc_fail"] = any([qc["flag_short"], qc["flag_off_center"], qc["flag_jitter"], qc["flag_no_periodicity"], qc["flag_flat_depth"], qc["flag_torso_unstable"]])
@@ -1080,7 +879,7 @@ class GaitAnalysisEngine:
             "still_fraction": float(still_mask.mean()),
             "mean_speed": float(speed.mean()),
             "max_speed": float(speed.max() if len(speed) > 0 else 0.0),
-            "total_time_sec": float(total_time_sec),
+            "total_time_sec": float(total_time_sec), # Added explicit total_time
         }
     
     @staticmethod
@@ -1183,8 +982,8 @@ class GaitAnalysisEngine:
         feats["trunk_lean_std"] = float(trunk_lean.std())
 
         # Heel Range (Added explicitly to match metadata)
-        left_heel_y = window[:, GaitAnalysisEngine.LEFT_HEEL,1]
-        right_heel_y = window[:, GaitAnalysisEngine.RIGHT_HEEL,1]
+        left_heel_y = window[:, GaitAnalysisEngine.LEFT_HEEL, 1]
+        right_heel_y = window[:, GaitAnalysisEngine.RIGHT_HEEL, 1]
         feats["heel_range_L"] = float(left_heel_y.max() - left_heel_y.min())
         feats["heel_range_R"] = float(right_heel_y.max() - right_heel_y.min())
 
@@ -1360,9 +1159,9 @@ class GaitAnalysisEngine:
             logger.error(f"Error processing CSV: {e}")
             return pd.DataFrame(), None
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # VISUALIZATION FUNCTIONS
-# ══════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def create_gait_score_dashboard(features_df):
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -1484,12 +1283,12 @@ def create_temporal_gait_heatmap(gait_cycles):
     ax.set_title('Temporal Gait Pattern Heatmap', fontsize=16); ax.set_xlabel('Timeline'); ax.set_ylabel('Joints')
     return fig
 
-# ════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 # STREAMLIT APPLICATION
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 
 def main():
-    st.set_page_config(page_title="Gait Analysis", page_icon="🎥", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title="MediaPipe Gait Analysis", page_icon="🎥", layout="wide", initial_sidebar_state="expanded")
     
     st.markdown("""<style>
     body { background-color: #F0F2F5; color: #2C3E50; }
@@ -1497,7 +1296,7 @@ def main():
     h1, h2, h3 { color: #1F2937; font-family: 'Segoe UI', sans-serif; font-weight: 600; }
     </style>""", unsafe_allow_html=True)
     
-    st.title("🚶 Gait Analysis & AI Modelling")
+    st.title("🚶 Production-Grade Gait Analysis & AI Modelling")
     st.markdown("**Complete Pipeline: Processing, Feature Engineering, Analysis & Prediction**")
     st.markdown("---")
     
@@ -1509,7 +1308,7 @@ def main():
         'uploaded_video_path': None, 'processing_complete': False, 'output_videos': {},
         'features_df': None, 'gait_cycles': None, 
         'pred_binary_results': None, 'pred_multiclass_results': None,
-        'csv_features_df': None
+        'csv_features_df': None # For standalone CSV upload
     }
     
     for key, val in default_state.items():
@@ -1591,10 +1390,6 @@ def main():
                             st.session_state.processing_complete = True
                             progress_bar.progress(100)
                             st.success("✅ Pipeline Complete")
-                            
-                            # --- BALLOON ADDED HERE ---
-                            st.balloons()
-                            
                         else:
                             st.error("❌ Pipeline failed")
                     except Exception as e:
@@ -1685,9 +1480,9 @@ def main():
             
             if fig: st.pyplot(fig); plt.close()
 
-    # ═══════════════════════════════════════════════════════════════════════
-    # TAB 6: AI MODELLING (FIXED UNICODE LOGGING & n_classes_)
-    # ══════════════════════════════════════════════════════════════════════════
+    # ═════════════════════════════════════════════════════════════════════════════════
+    # TAB 6: AI MODELLING (FIXED UNICODE LOGGING)
+    # ═════════════════════════════════════════════════════════════════════════════════
 
     with t6:
         st.subheader("AI Modelling & Prediction")
@@ -1850,10 +1645,6 @@ def main():
                 
                 with st.expander("View Detailed Probability Breakdown"):
                     st.dataframe(res_df[display_cols])
-        # ════════════════════════════════════════════════════════════════════════════════════════
 
-                    
 if __name__ == "__main__":
     main()
-
-

@@ -1851,7 +1851,7 @@ def main():
                 with st.expander("View Detailed Probability Breakdown"):
                     st.dataframe(res_df[display_cols])
         # ════════════════════════════════════════════════════════════════════════════════════════
-
+    
                     
 if __name__ == "__main__":
     main()
