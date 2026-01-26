@@ -109,7 +109,7 @@ ANOMALY_CLASS_MAP = {
 # %%
 # Load data from MediaPipe Pose stored in Parquet file
 
-df = pl.read_parquet('/Users/pierre/Documents/NF_Bootcamp/Capstone/GAITy-Capstone-Modeling/data/filled_gait_data_encoded.parquet')
+df = pl.read_parquet('../data/clean_gait_data.parquet')
 
 
 # %%
