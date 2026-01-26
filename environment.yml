@@ -32,6 +32,7 @@ dependencies:
   - networkx=3.6.1
   - polars=1.37.1
   - duckdb=1.4.3
+  - xgboost=1.7.3
   - pip:
     # Now list the packages that are only available via pip or need specific versions
     - streamlit==1.28.0
