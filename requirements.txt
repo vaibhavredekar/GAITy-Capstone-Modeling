@@ -15,7 +15,7 @@ xgboost==1.7.3
 mediapipe==0.10.14
 
 # Computer Vision
-opencv-python-headless==4.9.0.80
+opencv-python==4.9.0.80
 pillow==10.4.0
 
 # Visualization & UI
