@@ -15,7 +15,7 @@ xgboost==1.7.3
 mediapipe==0.10.14
 
 # Computer Vision (Downgraded to 4.8 to be compatible with numpy 1.23)
-opencv-contrib-python-headless==4.8.1.78
+opencv-python-headless==4.9.0.80
 pillow==10.4.0
 
 # Visualization & UI
