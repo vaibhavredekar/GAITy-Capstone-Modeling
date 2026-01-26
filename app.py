@@ -704,40 +704,46 @@ class PipelineManager:
 #         except Exception as e:
 #             st.error(f"❌ Display error: {str(e)}")
 
+
 class VideoDisplay:
     
     @staticmethod
     def get_video_info(video_path: Path) -> Optional[dict]:
         """
-        Robustly extracts video metadata.
-        Uses try/finally to ensure the video capture resource is always released.
+        Extract video metadata using imageio (via ffmpeg backend).
+        This is more reliable than cv2 for container-level data.
         """
-        cap = None
+        reader = None
         try:
             if not video_path.exists():
                 return None
-                
-            cap = cv2.VideoCapture(str(video_path))
-            if not cap.isOpened():
-                logger.error(f"Cannot open video for info: {video_path}")
-                return None
 
-            fourcc_int = int(cap.get(cv2.CAP_PROP_FOURCC))
-            # Decode fourcc
-            fourcc_str = "".join([chr((fourcc_int >> 8 * i) & 0xFF) for i in range(4)]).strip()
+            # imageio uses ffmpeg to probe the file
+            reader = imageio.get_reader(str(video_path))
+            meta = reader.get_meta_data()
             
-            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            fps = meta.get('fps', 30.0) # Default to 30 if missing
+            # Calculate duration: frames / fps
+            frame_count = reader.count_frames()
+            duration = frame_count / fps if fps > 0 else 0
             
-            # Calculate duration safely
-            duration = 0
-            if fps > 0:
-                duration = frame_count / fps
-            
+            # Get dimensions from meta or first frame
+            size = meta.get('size', None)
+            if size:
+                width, height = size
+            else:
+                # Fallback: try reading the first frame
+                try:
+                    frame = reader.get_data(0)
+                    height, width = frame.shape[:2]
+                except Exception:
+                    width, height = 0, 0
+
             # Get file size
             size_mb = video_path.stat().st_size / (1024 * 1024)
+            
+            # Try to get codec from metadata (often 'h264', 'mpeg4', 'avc1')
+            codec = meta.get('codec', 'unknown')
 
             return {
                 'width': width,
@@ -746,23 +752,20 @@ class VideoDisplay:
                 'frames': frame_count,
                 'duration': duration,
                 'size_mb': size_mb,
-                'codec': fourcc_str
+                'codec': codec
             }
         except Exception as e:
-            logger.error(f"Exception in get_video_info: {e}")
+            logger.error(f"Exception in get_video_info (imageio): {e}")
             return None
         finally:
-            if cap is not None:
-                cap.release()
+            if reader is not None:
+                reader.close()
 
     @staticmethod
     def display_video_with_download(video_path: Optional[Path], label: str, key_suffix: str) -> None:
         """
-        Displays a video and provides a download button.
-        
-        - Uses VideoConverter to ensure compatibility.
-        - Passes file PATH to st.video (zero-copy) to prevent RAM spikes.
-        - Automatically handles .mp4 and .avi MIME types.
+        Displays video and provides download button.
+        Uses imageio for metadata, streams file for display/download.
         """
         st.markdown(f"**{label}**")
         
@@ -771,19 +774,17 @@ class VideoDisplay:
             return
         
         try:
-            # 1. Ensure compatibility (might return .avi as fallback)
+            # 1. Ensure compatibility (Uses VideoConverter which uses imageio/opencv fallbacks)
             web_video = VideoConverter.ensure_web_compatible(video_path)
             
             if not web_video.exists():
                 st.error("❌ Converted video file is missing.")
                 return
 
-            # 2. Display Video
-            # Passing the string path allows Streamlit to stream the file efficiently
-            # without loading the whole thing into memory.
+            # 2. Display Video (Pass raw string path for streaming)
             st.video(str(web_video))
             
-            # 3. Layout for Info and Download
+            # 3. Layout
             col_info, col_download = st.columns([3, 1])
             
             with col_info:
@@ -807,7 +808,7 @@ class VideoDisplay:
 
             with col_download:
                 # 4. Download Button
-                # Determine correct MIME type based on file extension
+                # Determine correct MIME type based on extension
                 if web_video.suffix.lower() == '.avi':
                     mime_type = "video/x-msvideo"
                 elif web_video.suffix.lower() == '.mov':
@@ -815,13 +816,13 @@ class VideoDisplay:
                 else:
                     mime_type = "video/mp4"
                 
-                # Pass the Path object directly. Streamlit handles the file reading efficiently.
+                # Pass an open file pointer for efficient streaming
                 st.download_button(
                     label="📥 Download",
-                    data=web_video, 
+                    data=open(web_video, 'rb'),
                     file_name=web_video.name,
                     mime=mime_type,
-                    key=f"dl_{key_suffix}", # Unique key for button state
+                    key=f"dl_{key_suffix}",
                     use_container_width=True
                 )
 
